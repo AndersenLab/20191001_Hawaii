@@ -19,6 +19,7 @@ library(cowplot)
 library(pals)
 library(grid)
 library(gridExtra)
+library(janitor)
 
 #setting working directory
 knitr::opts_knit$set(root.dir = '..')
@@ -164,6 +165,85 @@ map_overview <- function(F, label, cso, geoms, face = "plain") {
 }
 ```
 
+### Personnel
+```{r, echo=F, warning = F, message=F}
+# pull names of personnel
+collectors <- pull(fulcrum_dat%>%dplyr::distinct(collection_by))
+isolators <- pull(fulcrum_dat%>%dplyr::distinct(isolation_by))
+
+# make personnel dataframe
+personnel_collectors <- data.frame(collectors)
+personnel_isolators <- data.frame(isolators)
+
+# print nice tables 
+knitr::kable(personnel_collectors)
+knitr::kable(personnel_isolators)
+```
+
+### Collection counts
+```{r, echo=TRUE}
+collection_counts_1 <- fulcrum_dat %>%
+  dplyr::distinct(collection_id, .keep_all = TRUE) %>%
+  dplyr::mutate(`total number of distinct collections` = n()) %>%
+  dplyr::filter(!is.na(collection_id)) %>%
+  dplyr::mutate(`total number of distinct collections NAs removed` = n()) %>%
+  dplyr::add_count(worms_on_sample) %>%
+  dplyr::rename(worms_on_sample_counts = n) %>%
+  dplyr::select(worms_on_sample, `total number of distinct collections`:worms_on_sample_counts) %>%
+  dplyr::distinct(worms_on_sample, .keep_all = T)
+
+`total number of distinct collections` <- pull(collection_counts_1 %>% distinct(`total number of distinct collections`))
+`total number of distinct collections NAs removed` <- pull(collection_counts_1 %>% distinct(`total number of distinct collections NAs removed`))
+`collections with nematodes` <- pull(collection_counts_1 %>% dplyr::filter(worms_on_sample == "Yes") %>% distinct(`worms_on_sample_counts`))
+`collections with tracks only` <- pull(collection_counts_1 %>% dplyr::filter(worms_on_sample == "Tracks") %>% distinct(`worms_on_sample_counts`))
+`collections without nematodes`<- pull(collection_counts_1 %>% dplyr::filter(worms_on_sample == "No") %>% distinct(`worms_on_sample_counts`))
+`collections without paired isolation data`<- pull(collection_counts_1 %>% dplyr::filter(worms_on_sample == "?") %>% distinct(`worms_on_sample_counts`))
+
+`collections with duplicated ids` <-  fulcrum_dat %>%
+  dplyr::filter(!is.na(collection_id)) %>%
+  dplyr::distinct(collection_id, isolation_datetime_UTC, .keep_all = T) %>%
+  dplyr::group_by(collection_id) %>%
+  dplyr::mutate(n = n()) %>% 
+  dplyr::ungroup() %>%
+  dplyr::mutate(duplicated = ifelse(n > 1, 1, 0)) %>%
+  dplyr::mutate(num_duplicated = sum(duplicated)) %>%
+  dplyr::distinct(num_duplicated) %>%
+  pull(num_duplicated)
+
+collection_counts <- tibble(`total number of distinct collections`,
+                                `total number of distinct collections NAs removed`,
+                                `collections with nematodes`,
+                                `collections with tracks only`,
+                                `collections without nematodes`,
+                                `collections without paired isolation data`,
+                                `collections with duplicated ids`) %>%
+  
+  
+  column_to_rownames(., loc = 1)
+  
+colnames(collection_counts)
+rownames(collection_counts)
+
+
+col
+
+
+`collection fraction with no worms`
+`collection fraction with tracks only`
+`collection fraction with nematodes`
+`collections with location method 'photo'`
+`collections with location method 'fulcrum'`
+`collection fraction with loc method 'photo'`
+`collection fraction with loc method 'fulcrum'`
+`collections with altitude method 'geonames'`
+`collections with altitude method 'fulcrum'`
+`collection fraction with altitude method 'geonames'`
+`collection fraction with altitude method 'fulcrum'`
+
+
+
+```
+
 ### Collection overview plot
 ```{r, echo=F, warning = F, message=F, fig.width=11, fig.height=7.5}
 # setup overview plot groups
@@ -267,6 +347,3 @@ overview_plot
 
 ```
 
-### Collection counts
-<br> notes go here <br>
-```{r, echo=TRUE}
