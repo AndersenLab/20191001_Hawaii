@@ -4,19 +4,15 @@ library(tidyverse)
 library(lubridate)
 library(geosphere)
 library(googlesheets)
+library(geonames)
+library(rebus)
 
 # Set working directory
 setwd(glue::glue("{dirname(rstudioapi::getActiveDocumentContext()$path)}/.."))
 
-LL <- c("longitude", "latitude")
-LLA <- c("longitude", "latitude", "altitude")
-
-# Team
-RAPTORS <- c("dec@u.northwestern.edu",
-             "daehan.lee@northwestern.edu",
-             "erik.andersen@northwestern.edu",
-             "stefanzdraljevic2018@u.northwestern.edu")
-
+###################################################################
+### Define functions                                            ###
+###################################################################
 
 filter_box <- function(longitude, latitude, coords) {
   between(longitude, coords[1], coords[3]) &
@@ -28,467 +24,242 @@ FtoC <- function(F) {
   (F - 32)*(5/9)
 }
 
-# Read in C-labels
-sc <- readr::read_csv("data/fulcrum/sample_collection.csv") %>%
+###################################################################
+### 1: Read field collection data (C-labels)                    ###
+###################################################################
+
+collection <- readr::read_csv("data/fulcrum/nematode_field_sampling.csv") %>%
   dplyr::mutate(c_label = stringr::str_to_upper(c_label)) %>%
-  dplyr::filter(project != "Worm Meeting Collection") %>%
-  dplyr::rename(sampled_by = created_by) %>%
+  # name created_by to specify who picked up the sample
+  dplyr::rename(collection_by = created_by) %>%
   dplyr::select(-updated_at,
                 -system_created_at,
                 -system_updated_at,
                 -date) %>%
-  dplyr::mutate(datetime = lubridate::ymd_hms(created_at, tz = "HST")) %>%
-  dplyr::mutate(date = lubridate::date(created_at)) %>%
+  # choose one sample photo only. This takes the first sample photo and warns if additional photos are discarded
+  tidyr::separate(col = sample_photo, into = "sample_photo", sep = ",", extra = "warn") %>%
+  # this is UTC time (very important if you want to convert to HST time)
+  dplyr::mutate(collection_datetime_UTC = lubridate::ymd_hms(created_at, tz = "UTC")) %>% 
+  # again this is UTC date (very important if you want to convert to HST date)
+  dplyr::mutate(collection_date_UTC = lubridate::date(created_at)) %>% 
   dplyr::select(-created_at) %>%
-  # Label substrate moisture issue (moisture meters were on potentially wrong settings at times before 2017-08-09)
-  dplyr::mutate(substrate_moisture = ifelse(substrate_moisture == -1, NA, substrate_moisture)) %>%
-  dplyr::mutate(substrate_moisture_issue = !(lubridate::ymd(date) %within% lubridate::interval("2017-08-09", "2017-08-31"))) %>%
-  # Two observations had a C > 50; Clearly wrong.
-  dplyr::mutate(substrate_temperature = ifelse(substrate_temperature == 100, NA, substrate_temperature)) %>%
   # Fix Fahrenheit observations
   dplyr::mutate(substrate_temperature = ifelse(substrate_temperature > 35,
                                                FtoC(substrate_temperature),
-                                               substrate_temperature)) %>%
-  # Fix substrate_temp_c when C < 9
-  dplyr::mutate(substrate_temperature = ifelse(substrate_temperature < 9,
-                                               NA,
-                                               substrate_temperature)) %>%
+                                               substrate_temperature)) %>% 
   # Fix ambient temp F to C
-  dplyr::mutate(ambient_temperature = ifelse(ambient_temperature > 50,
-                                             FtoC(ambient_temperature),
-                                             ambient_temperature)) %>%
-  # Fix mispelling
-  dplyr::mutate(substrate = ifelse(substrate == "Millipeed",
-                                   "Millipede",
-                                   substrate))
+  dplyr::mutate(ambient_temperature = ifelse(ambient_temperature_c > 50,
+                                             FtoC(ambient_temperature_c),
+                                             ambient_temperature_c)) %>%
+  # force ambient temp to numeric
+  dplyr::mutate(ambient_temperature = as.numeric(ambient_temperature)) %>%
+  # drop ambient temp c
+  dplyr::select(-ambient_temperature_c) %>%
+  # add flags for runs of temperature data
+  dplyr::arrange(collection_datetime_UTC) %>%
+  dplyr::mutate(flag_ambient_temperature_run = (ambient_humidity == dplyr::lag(ambient_humidity)) &
+                  (ambient_temperature == dplyr::lag(ambient_temperature))
+                & (gridsect == "no"))
 
-
+###################################################################
+### 2: Read isolation data (S-labels)                           ###
+###################################################################
 
 # Read in S-labels
-po <- readr::read_csv("data/fulcrum/plating_out.csv") %>%
+isolation <- readr::read_csv("data/fulcrum/nematode_isolation.csv") %>%
   dplyr::select(c_label_id = c_label,
-                po_id = fulcrum_id,
-                po_created_at = system_created_at,
-                po_created_by = created_by,
+                isolation_id = fulcrum_id,
+                isolation_datetime_UTC = system_created_at,
+                isolation_by = created_by,
                 worms_on_sample,
                 approximate_number_of_worms,
-                males_observed,
-                dauers_on_sample,
-                approximate_number_of_worms,
-                po_date = date,
-                po_time = time,
-                po_latitude = latitude,
-                po_longitude = longitude)
+                isolation_date_UTC = date,
+                isolation_local_time = time,
+                isolation_latitude = latitude,
+                isolation_longitude = longitude)
 
+#############################################################################
+### 3: Use exiftool to extract lat, long elevation. ONLY NEED TO RUN ONCE ###
+#############################################################################
 
-# Add data from collection photos lat, long, elevation. Only need to run once to extract data.
-# Read in data from photos. Need to install using ‘brew install exiftool’ in terminal.
+# # Read in data from photos. Need to install using ‘brew install exiftool’ in terminal.
 # comm <- paste0("exiftool -coordFormat '%+.6f' -csv -ext jpg ",
-#                getwd(),
-#                "/data/fulcrum/photos/id/*")
-
-# Exif Data
-# exif <- readr::read_csv(pipe(comm)) %>%
-#   dplyr::mutate(SourceFile = stringr::str_replace(basename(SourceFile), ".jpg", "")) %>%
-#   dplyr::select(sample_photo = SourceFile,
-#                 altitude = GPSAltitude,
-#                 latitude = GPSLatitude,
-#                 longitude = GPSLongitude,
-#                 ExposureTime,
-#                 Artist,
-#                 Aperture,
-#                 BrightnessValue,
-#                 PhotoDate = DateCreated,
-#                 FOV) %>%
-#   dplyr::mutate(altitude =  as.numeric(stringr::str_replace(altitude, " m", ""))) %>%
-#   dplyr::mutate(FOV =  as.numeric(stringr::str_replace(FOV, " deg", ""))) %>%
-#   dplyr::group_by(sample_photo) %>%
-#   # Only retain data from one sample photo.
-#   dplyr::distinct(.keep_all=T)
+#                 getwd(),
+#                 "/photos/*")
+# 
+# # Exif Data
+#  exif <- readr::read_csv(pipe(comm)) %>%
+#    dplyr::mutate(SourceFile = stringr::str_replace(basename(SourceFile), ".jpg", "")) %>%
+#    dplyr::select(sample_photo = SourceFile,
+#                  altitude = GPSAltitude,
+#                  latitude = GPSLatitude,
+#                  longitude = GPSLongitude,
+#                  ExposureTime,
+#                  Artist,
+#                  Aperture,
+#                  BrightnessValue,
+#                  FOV) %>%
+#    dplyr::mutate(altitude =  as.numeric(stringr::str_replace(altitude, " m", ""))) %>%
+#    dplyr::mutate(FOV =  as.numeric(stringr::str_replace(FOV, " deg", ""))) %>%
+#    dplyr::group_by(sample_photo) %>%
+#    # Only retain data from one sample photo.
+#    dplyr::distinct(.keep_all=T)
 # save(file = "data/fulcrum/exif.Rda", exif)
+
 # load data from images already processed by Exif
 load("data/fulcrum/exif.Rda")
 
-# Join Data
-df <- dplyr::full_join(po, sc, by = c("c_label_id" = "fulcrum_id")) %>%
-  dplyr::rename(record_latitude = latitude, record_longitude = longitude) %>%
+###################################################################
+### 4: Join collection, isolation, and location data            ###
+###################################################################
+
+#prevent scientific notation
+options(scipen=999)
+
+# join collection, isolation, and location data
+df1 <- dplyr::full_join(isolation, collection, by = c("c_label_id" = "fulcrum_id")) %>%
+  #rename the lat and long from fulcrum to collection_fulcrum_latitude and collection_fulcrum_longitude so that we can specify lat and long from exif tool
+  dplyr::rename(collection_fulcrum_latitude = latitude, collection_fulcrum_longitude = longitude) %>%
   dplyr::select(c_label,
                 everything(),
                 -c_label_id,
                 -sample_photo_url) %>%
+  # Join position data from exif by sample_photo. in some cases there is not position data from the photos
   dplyr::left_join(exif) %>%
-  # In rare cases, lat/lon not with photo; fix.
-  dplyr::mutate(latitude = ifelse(is.na(latitude), record_latitude, latitude)) %>%
-  dplyr::mutate(longitude = ifelse(is.na(longitude), record_longitude, longitude)) %>%
-  dplyr::mutate(ambient_temperature = as.numeric(ambient_temperature)) %>%
-  dplyr::mutate(ambient_temperature = ifelse(ambient_temperature > 70,
-                                             ((5/9)*(ambient_temperature-32)),
-                                             ambient_temperature)) %>%
-  dplyr::mutate_at(.vars = vars(dplyr::starts_with("gps")),
-                   .funs = funs(as.numeric)) %>%
-  dplyr::mutate(team = ifelse(sampled_by %in% RAPTORS, "RAPTORS", "MOANA")) %>%
+  # Create flag to track if lat and long come from record or photo
+  dplyr::mutate(collection_lat_long_method = ifelse(is.na(latitude), "fulcrum", "photo")) %>%
+  # In cases where lat/lon are not available from photo set to collection_fulcrum_latitude and collection_fulcrum_longitude 
+  dplyr::mutate(latitude = ifelse(is.na(latitude), collection_fulcrum_latitude, latitude)) %>%
+  dplyr::mutate(longitude = ifelse(is.na(longitude), collection_fulcrum_longitude, longitude)) %>%
+  #dplyr::mutate_at(.vars = vars(dplyr::starts_with("gps")),
+  #                 .funs = funs(as.numeric)) %>%
+  dplyr::rename(fulcrum_altitude = gps_altitude) %>%
   dplyr::mutate(worms_on_sample = ifelse(is.na(worms_on_sample), "?", worms_on_sample)) %>%
   dplyr::filter(!is.na(c_label)) %>%
   dplyr::select(-assigned_to,
                 -status,
                 -Artist) %>%
-  # Calculate the Haversine distance
+  # Calculate the Haversine distance between fulcrum record_latitude and record_longitue and photo latitude and longitude
   dplyr::rowwise() %>%
-  dplyr::mutate(gps_err = geosphere::distHaversine(c(longitude, latitude),
-                                                   c(record_longitude, record_latitude))) %>%
-  dplyr::ungroup()
+  dplyr::mutate(collection_lat_long_method_diff = geosphere::distHaversine(c(longitude, latitude),
+                                                   c(collection_fulcrum_longitude, collection_fulcrum_latitude)),
+                # adjust collection_lat_long_method_diff to NA if there is only a fulcrum GPS postion
+                collection_lat_long_method_diff = ifelse(collection_lat_long_method == "fulcrum", NA, collection_lat_long_method_diff)) %>%
+  # rename the latitude and longitude to include 'collection_' prefix
+  dplyr::ungroup() %>%
+  dplyr::rename(collection_latitude = latitude,
+                collection_longitude = longitude,
+                collection_local_time = time)
 
-# Generate dataset mapping C-labels to S-labels
-po_slabels <- readr::read_csv("data/fulcrum/plating_out_s_labeled_plates.csv") %>%
+
+####################################################################
+###      (OPTIONAL) CORRECT DUPLICATE ISOLATIONS (OPTIONAL)      ###
+####################################################################
+
+# In 9 instances there were two separate isolation records for the same c_label.
+# selecting to retain the isolation record based on worm presence. Yes > tracks > no.
+# If both isolation records indicate "tracks only" or "no" then we retain the earliest record.
+# In no cases did both isolation records indicate worms were present on c_label.
+duplicated_isolations_to_remove <- c("5535470e-d82d-4ca4-ac77-860ea62c51c1",
+                                    "340dbd85-7b9a-4ecb-be5f-ac1ef944e057",
+                                    "88a12c25-a129-45e0-9306-c3a232b33552",
+                                    "8ad23d90-c0b8-4aa1-b135-f2d1fead94d4",
+                                    "036a80ac-3372-4c3c-b40d-edfa0a9d68cc",
+                                    "6dbecd43-e4e3-405f-b4dc-e757ad4449a5",
+                                    "6fa1a690-ea42-49a7-b86d-e7181b9f68bf",
+                                    "90f59eb1-abf8-4e7a-8ebc-d3148527b831",
+                                    "cee218c8-aad0-4e1b-9a04-0b084439cfab")
+df1 <- df1 %>%
+  dplyr::filter(!isolation_id %in% duplicated_isolations_to_remove)
+
+###################################################################
+### 5: Joining C_lables with S_labels                           ###
+###################################################################
+
+df2 <- readr::read_csv("data/fulcrum/nematode_isolation_s_labeled_plates.csv") %>%
   dplyr::select(fulcrum_parent_id, s_label) %>%
-  dplyr::left_join(df, by = c("fulcrum_parent_id" = "po_id")) %>%
-  dplyr::select(c_label,
-                s_label,
-                worms_on_sample,
-                males_observed,
-                dauers_on_sample,
-                approximate_number_of_worms,
-                po_date,
-                po_time,
-                longitude,
-                latitude,
-                substrate_temperature,
-                substrate_moisture,
-                ambient_humidity,
-                ambient_temperature,
-                sampled_by)
+  dplyr::full_join(df1, by = c("fulcrum_parent_id" = "isolation_id")) %>% # this used to be a left join
+  dplyr::select(-fulcrum_parent_id, -updated_by, -version, -geometry, -gps_horizontal_accuracy,
+                -gps_vertical_accuracy, -gps_speed, -gps_course, -ExposureTime, 
+                -Aperture, -BrightnessValue, -FOV, -altitude) %>%
+  # set S-labels to NA if isolation entry is 'no plates' there is 1 instance of this.
+  dplyr::mutate(s_label = ifelse(s_label == "no plates", NA, s_label))
 
-po_slabels <- po_slabels %>% 
-  dplyr::filter(!is.na(c_label), !is.na(s_label))
+###################################################################
+### 6: Handle Substrates                                        ###
+###################################################################
 
-# Add Nested S-labels
-df <- dplyr::left_join(df, 
-                       po_slabels %>%
-                         dplyr::select(c_label, s_label) %>%
-                         dplyr::group_by(c_label) %>%
-                         dplyr::summarize(s_label_cnt = length(s_label), 
-                                          s_label = paste0(s_label, collapse = ","))) %>%
-  dplyr::select(c_label, s_label, s_label_cnt, everything(), -po_id)
+# adjust substrate categories if needed
 
+###################################################################
+### 7: Get alititudes from ggs locations                        ###
+###################################################################
 
-# Samples collected that were never processed.
-c_labels_never_processed = df %>% 
-  dplyr::filter(worms_on_sample == "?") %>%
-  dplyr::select(c_label)
-
-
-# Keep track of points that are corrected
-df$GPS_corrected = F
-
-# * * * * * * * * * * * * * * * * * * * * * * * * * * * * #
-# Part 1 Average GPS location of off or missing points    #
-# * * * * * * * * * * * * * * * * * * * * * * * * * * * * #
-
-df <-dplyr::arrange(df, team, date, time)
-wrong_pos <- c("C-0804",
-               "C-0240",
-               "C-0742",
-               "C-0549",
-               "C-1066",
-               "C-0642",
-               "C-1203",
-               "C-1132",
-               "C-1308",
-               "C-1319",
-               "C-2598",
-               "C-2599")
-
-sapply(wrong_pos, function(c_label) {
-  row_num <- which(df$c_label == c_label)
-  p1 <- unlist(df[row_num-1, LL])
-  p2 <- unlist(df[row_num+1, LL])
-  # The <<- goes to the global environment.
-  df[row_num, LL] <<- gcIntermediate(p1, p2, n = 1, addStartEnd=FALSE)
-  df[row_num, "altitude"] <<- mean(unlist(df[c(row_num -1, row_num + 1), "altitude"]))
-  df[row_num, c("GPS_corrected")] <<- T
-})
-
-# * * * * * * * * * * * * * * * * * * * * #
-# Part 2: Use Record GPS to correct point #
-# * * * * * * * * * * * * * * * * * * * * #
-wrong_pos <- c("C-1079",
-               "C-1072",
-               "C-0561",
-               "C-0588",
-               "C-0772",
-               "C-0642",
-               "C-1330",
-               "C-1231",
-               "C-0869",
-               "C-0339",
-               "C-1365",
-               "C-2527",
-               "C-2543",
-               "C-2547",
-               "C-1462",
-               "C-1460",
-               "C-1466",
-               "C-2591")
-
-sapply(wrong_pos, function(c_label) {
-  row_num <- which(df$c_label == c_label)
-  # The <<- goes to the global environment.
-  df[row_num, LL] <<- df[row_num, c("record_longitude", "record_latitude")]
-  df[row_num, c("GPS_corrected")] <<- T
-})
-
-#=============================#
-# Part 3: Manual Corrections #
-#===========================#
-
-# Part 3: Manual Corrections
-
-positions <- df %>% dplyr::filter(c_label %in% c("C-0447", "C-0446")) %>% dplyr::select(longitude, latitude)
-p1 <- positions[1,]
-p2 <- positions[2,]
-corrected_lat_lon <- gcIntermediate(p1, p2, n=1, addStartEnd=F)
-df[df$c_label == "C-1077", LL] <- corrected_lat_lon
-df[df$c_label == "C-1078", LL] <- corrected_lat_lon
-df[df$c_label %in% c("C-1078","C-1077"), "altitude"] <- df[df$c_label %in% c("C-0447") , "altitude"]
-df[df$c_label %in% c("C-1078","C-1077"), "GPS_corrected"] <- T
-
-#====================================#
-# Part 4: Fix Day 3 sample from Maui #
-#====================================#
-
-c_label_update <- (df[df$latitude == unlist(df[df$c_label == "C-1222","latitude"]), "c_label"])$c_label
-df[df$c_label %in% c_label_update, "longitude"] <- -156.150537
-df[df$c_label %in% c_label_update, "latitude"] <- 20.854776
-df[df$latitude == unlist(df[df$c_label == "C-1222","latitude"]), "GPS_corrected"] = T
-
-#====================================#
-# Part 5: Fix Day 3 sample from Maui #
-#====================================#
-
-#Change C-1226, 1230, and 1234 to average between samples C-1238 and C-1222
-positions <- df[df$c_label %in% c("C-1238", "C-1222"), LL]
-p1 <- positions[1,]
-p2 <- positions[2,]
-corrected_lat_lon <- gcIntermediate(p1, p2, n=1, addStartEnd=F)
-df[df$c_label == "C-1226", LL] <- corrected_lat_lon
-df[df$c_label == "C-1230", LL] <- corrected_lat_lon
-df[df$c_label == "C-1234", LL] <- corrected_lat_lon
-df[df$c_label %in% c("C-1226", "C-1230", "C-1234"), "GPS_corrected"] = T
-
-#====================================#
-# Part 6: Fix Day 3 sample from Maui #
-#====================================#
-
-#Check maui day 4
-#13 samples on Big Island, should be at Waihou Spring Forrest Reserve. Change to estimated gps
-errant_latitude <- (df[which(df$c_label == "C-1487"), "latitude"])$latitude
-errant_c_labels <- (df[df$latitude == errant_latitude,"c_label"])$c_label
-corrected_lat_lon <- df[df$c_label == "C-2627", LL]
-sapply(errant_c_labels, function(c_label) {
-  row_num <- which(df$c_label == c_label)
-  # The <<- goes to the global environment.
-  df[row_num, LL] <<- corrected_lat_lon
-  df[row_num, c("GPS_corrected")] <<- T
-})
-
-#====================================#
-# Part 7: Fix Day 5 sample from Maui #
-#====================================#
-
-#Check Maui day 5
-df[df$c_label == "C-2521", LL] <- df[df$c_label == "C-2554", LL]
-
-#=============================#
-# Part 8: Gridsect Positions #
-#===========================#
-
-# Correct a group by another position from the same gridsect
-wrong_pos <- c("C-0708", "C-1064", "C-0617", "C-1063", "C-0616")
-df[df$c_label %in% wrong_pos, LLA] <- df[df$c_label == "C-1061", LLA]
-df[df$c_label %in% wrong_pos, "GPS_corrected"] <- T
-
-sapply(wrong_pos, function(c_label) {
-  row_num <- which(df$c_label == c_label)
-  p1 <- unlist(df[row_num-1, LL])
-  p2 <- unlist(df[row_num+1, LL])
-  # The <<- goes to the global environment.
-  df[row_num, LL] <<- gcIntermediate(p1, p2, n = 1, addStartEnd=FALSE)
-  df[row_num, c("GPS_corrected")] <<- T
-})
-
-
-#=============================#
-# Part 9: Fix gridsect values #
-#=============================#
-
-gridsect_modified = c("C-0567",
-                      "C-0266",
-                      "C-0282",
-                      "C-0271",
-                      "C-0777",
-                      "C-1133",
-                      "C-2605",
-                      "C-2782")
-
-# 20170807 - C-0567 : C2 -> D2
-df[df$c_label == "C-0567", "gridsect_direction"] = "D"
-# 20170809 - C-0266,0282,0271 : B123 -> D123
-df[df$c_label %in% c("C-0266", "C-0282", "C-0271"), "gridsect_direction"] = "D"
-# 20170812 - C-0777 : E2 -> F2
-df[df$c_label == "C-0777", "gridsect_direction"] = "F"
-# 20170813 - C-1133 : B1 -> C1
-df[df$c_label == "C-1133", "gridsect_direction"] = "C"
-# 20170817 - C-2605 : E3 -> F3
-df[df$c_label == "C-2605", "gridsect_direction"] = "F"
-#20170817, multiple B3s
-df[df$c_label == "C-2782", "gridsect_radius"] = "1"
-
-df$gridsect_corrected = F
-df[df$c_label %in% gridsect_modified, "gridsect_corrected"] <- T
-
-# Convert radius to numeric
-df <- df %>% dplyr::rowwise() %>%
-  dplyr::mutate(gridsect_radius = as.integer(
-    substr(gridsect_radius,1,1)
-  ))
-
-
-#=======================#
-# Reclassify substrates #
-#=======================#
-
-# * Merge fruit/nut/vegetable
-# * Reclassify rotting in substrate other as rotting wood
-# * Create vegetation category.
-
-substrate_merge <- c("Fruit",
-                     "Rotting fruit",
-                     "Nut",
-                     "Rotting nut")
-
-df <- df %>% dplyr::ungroup() %>%
-  dplyr::mutate(substrate = ifelse(substrate %in% substrate_merge, "Fruit/nut/vegetable", substrate)) %>%
-  dplyr::mutate(substrate = ifelse(substrate %in% c("Rotting fungus"), "Fungus", substrate)) %>%
-  dplyr::mutate(substrate = ifelse(grepl("rotting|Rotting", substrate_other), "Rotting wood", substrate)) %>%
-  dplyr::mutate(substrate = ifelse(is.na(substrate), "Vegetation", substrate)) %>%
-  dplyr::mutate(substrate = ifelse(substrate == "Soil", "Leaf litter", substrate)) %>%
-  dplyr::mutate(substrate = ifelse(substrate == "Rotting vegetable", "Vegetation", substrate))
-
-#===============================#
-#  Add flags for runs of values #
-#===============================#
-
-df <- dplyr::arrange(df, team, date, time) %>%
-  dplyr::group_by(team) %>%
-  dplyr::mutate(ambient_run_flag = (ambient_humidity == dplyr::lag(ambient_humidity)) &
-                  (ambient_temperature == dplyr::lag(ambient_temperature))
-                & (gridsect == "no")) 
-
-#==================#
-# Update altitudes #
-#==================#
-# only need to run once to get altitudes.
-# library(geonames)
+# #only need to run once to get altitudes.
 # options(geonamesUsername="katiesevans")
-# altitudes <- df %>% dplyr::ungroup() %>%
-#        dplyr::select(c_label, latitude, longitude, altitude) %>%
-#        dplyr::rowwise() %>%
-#        dplyr::mutate(altitude = ifelse(is.na(altitude),
-#                                       geonames::GNsrtm3(latitude, longitude)$srtm3,
-#                                       altitude)
-#                      ) %>%
-#         dplyr::ungroup()
+# altitudes <- df1 %>%
+#   dplyr::ungroup() %>%
+#   dplyr::select(c_label, collection_latitude, collection_longitude) %>%
+#   dplyr::rowwise() %>%
+#   # Use collection_latitidue and collection_longitude to find altitudes. Note, these lat and longs should be spot checked to ensure proper collection locations.
+#   dplyr::mutate(geonames_altitude = geonames::GNsrtm3(collection_latitude, collection_longitude)$srtm3) %>%
+#   dplyr::ungroup()
+# 
 # save(altitudes, file = "data/fulcrum/altitude.Rda")
 
+# join geonames altitude data to record altitude data
 load("data/fulcrum/altitude.Rda")
 
-df <- df %>% dplyr::ungroup() %>%
-  dplyr::select(-altitude) %>%
-  dplyr::left_join(altitudes, by = c("c_label", "longitude", "latitude"))
+df3 <- df2 %>%
+  dplyr::ungroup() %>%
+  dplyr::inner_join(altitudes) %>%
+  # make altitude variable and altitude_method variables to track which altitude is being used
+  dplyr::mutate(altitude_method_diff = geonames_altitude - fulcrum_altitude,
+                altitude = ifelse(collection_lat_long_method == "photo", geonames_altitude,
+                                  ifelse(is.na(fulcrum_altitude), geonames_altitude, fulcrum_altitude)),
+                altitude_method = ifelse(collection_lat_long_method == "photo", "geonames",
+                                         ifelse(is.na(fulcrum_altitude), "geonames", "fulcrum")))
+  
 
-#=========================================#
-# Remove dauer estimates in Evanston (NA) #
-#=========================================#
-
-evanston_collectors <- c("joost.vanderzwaag@wur.nl",
-                         "steffen.hahnel@northwestern.edu",
-                         "robyn.tanny@northwestern.edu",
-                         "tcrombie@northwestern.edu",
-                          NA)
-
-df <- df %>% 
-  dplyr::mutate(po_in_evanston = ifelse(po_created_by %in% evanston_collectors, T, F)) %>%
-  dplyr::mutate(dauers_on_sample = ifelse(po_in_evanston, NA, dauers_on_sample))
-
-#=============================#
-# Part X: Set the islands!    #
-#=============================#
+###################################################################
+### 8: Assign Islands and trails                                ###
+###################################################################
 
 # Create Island Column
-df$island <- "?"
-df[filter_box(df$longitude, df$latitude, c(-158.3617,21.1968,-157.5117,21.7931)), "island"] <- "Oahu"
-df[filter_box(df$longitude, df$latitude, c(-159.9362, 21.6523, -159.1782, 22.472)), "island"] <- "Kauai"
-df[filter_box(df$longitude, df$latitude, c(-157.327, 21.0328, -156.685, 21.2574)), "island"] <- "Molokai"
-df[filter_box(df$longitude, df$latitude, c(-156.7061, 20.4712, -155.9289, 21.0743)), "island"] <- "Maui"
-df[filter_box(df$longitude, df$latitude, c(-156.1346, 18.6619, -154.6985, 20.4492)), "island"] <- "Big Island"
-
-# Fix errant GPS locations from team Moana and Erik
-df[df$island == "BIG_ISLAND" & df$team == "MOANA" , c("latitude", "longitude")] <- NA
-df[df$island == "BIG_ISLAND" & df$team == "MOANA" & !is.na(df$island), "island"] <- "MAUI"
+df3$collection_island <- "?"
+df3[filter_box(df3$collection_longitude, df3$collection_latitude, c(-158.3617,21.1968,-157.5117,21.7931)), "collection_island"] <- "Oahu"
+df3[filter_box(df3$collection_longitude, df3$collection_latitude, c(-159.9362, 21.6523, -159.1782, 22.472)), "collection_island"] <- "Kauai"
+df3[filter_box(df3$collection_longitude, df3$collection_latitude, c(-157.327, 21.0328, -156.685, 21.2574)), "collection_island"] <- "Molokai"
+df3[filter_box(df3$collection_longitude, df3$collection_latitude, c(-156.7061, 20.4712, -155.9289, 21.0743)), "collection_island"] <- "Maui"
+df3[filter_box(df3$collection_longitude, df3$collection_latitude, c(-156.1346, 18.6619, -154.6985, 20.4492)), "collection_island"] <- "Big Island"
 
 # Create Trail Column
-df$location <- NA
+df3$collection_location <- NA
+df3[filter_box(df3$collection_longitude, df3$collection_latitude, c(-157.72537,21.303309,-157.71919,21.32122)), "collection_location"] <- "Kuliouou Ridge Trail"
+df3[filter_box(df3$collection_longitude, df3$collection_latitude, c(-158.0192352613,21.5014265529,-158.0145925283,21.5041245046)), "collection_location"] <- "Wahiawa Botanical Garden"
+df3[filter_box(df3$collection_longitude, df3$collection_latitude, c(-157.8598800302,21.3149311581,-157.855797708,21.3182194587)), "collection_location"] <- "Foster Community Garden"
+df3[filter_box(df3$collection_longitude, df3$collection_latitude, c(-157.7829487403,21.3569863645,-157.7752268314,21.3655295525)), "collection_location"] <- "Maunawili Demonstration Trail"
+df3[filter_box(df3$collection_longitude, df3$collection_latitude, c(-157.8014534712,21.3322593,-157.798127532,21.3427719396)), "collection_location"] <- "Manoa Falls Trail"
+df3[filter_box(df3$collection_longitude, df3$collection_latitude, c(-157.8135502338,21.3779082884,-157.7915561199,21.3970691079)), "collection_location"] <- "Ho'omaluhia Botanical Garden"
+df3[filter_box(df3$collection_longitude, df3$collection_latitude, c(-159.613624,22.167098,-159.575601,22.226422)), "collection_location"] <- "Na Pali Coast State Wilderness Park"
 
-df[filter_box(df$longitude, df$latitude, c(-157.72537,21.303309,-157.71919,21.32122)), "location"] <- "Kuliouou Ridge Trail"
-df[filter_box(df$longitude, df$latitude, c(-158.0192352613,21.5014265529,-158.0145925283,21.5041245046)), "location"] <- "Wahiawa Botanical Garden"
-df[filter_box(df$longitude, df$latitude, c(-157.8598800302,21.3149311581,-157.855797708,21.3182194587)), "location"] <- "Foster Community Garden"
-df[filter_box(df$longitude, df$latitude, c(-157.7829487403,21.3569863645,-157.7752268314,21.3655295525)), "location"] <- "Maunawili Demonstration Trail"
-df[filter_box(df$longitude, df$latitude, c(-157.8014534712,21.3322593,-157.798127532,21.3427719396)), "location"] <- "Manoa Falls Trail"
-df[filter_box(df$longitude, df$latitude, c(-157.8135502338,21.3779082884,-157.7915561199,21.3970691079)), "location"] <- "Ho'omaluhia Botanical Garden"
-df[filter_box(df$longitude, df$latitude, c(-159.613624,22.167098,-159.575601,22.226422)), "location"] <- "Na Pali Coast State Wilderness Park"
+###################################################################
+### 9: Add photo URLs                                           ###
+###################################################################
 
-#==========================#
-# Setup gridsect variables #
-#==========================#
-
-grids <- df %>% dplyr::filter(gridsect == 'yes') %>%
-  select(c_label, gridsect_direction, gridsect_radius, island, datetime, team, date) %>%
-  dplyr::group_by(c_label) %>%
-  dplyr::distinct()
-
-missing_gridsect <- tibble::tibble(c_label = NA,
-                                   gridsect_direction = "E",
-                                   gridsect_radius = 3,
-                                   island = "Maui",
-                                   datetime = as.POSIXct("2017-08-16 15:56:00 HST"),
-                                   team = "MOANA",
-                                   date = as.Date("2017-08-16"))
-
-grids <- dplyr::bind_rows(grids, missing_gridsect) %>%
-  dplyr::arrange(island, date, team, datetime)
-
-grids$grid_num <- sort(rep(1:20, 19))
-
-df <- df %>% dplyr::left_join(grids %>% dplyr::select(c_label, grid_num), 
-                              by = c("c_label"))
-
-
-#===============#
-# Add photo URL #
-#===============#
-df <-df %>% dplyr::rowwise() %>%
-  dplyr::group_by(c_label) %>%
-  dplyr::mutate(photo = paste0(c_label,
-                               ".",
-                               stringr::str_to_lower(stringr::str_replace_all(substrate, "[^[:alnum:]]", "_")),
-                               ".1.jpg"),
-                photo_url = paste0("https://storage.googleapis.com/elegansvariation.org/photos/hawaii2017/",
-                                   c_label,
-                                   ".jpg"),
-                photo_url_thumb =  paste0("https://storage.googleapis.com/elegansvariation.org/photos/hawaii2017/",
-                                          c_label,
-                                          ".thumb.jpg")) %>%
-  dplyr::ungroup()
+# df <-df %>% dplyr::rowwise() %>%
+#   dplyr::group_by(c_label) %>%
+#   dplyr::mutate(photo = paste0(c_label,
+#                                ".",
+#                                stringr::str_to_lower(stringr::str_replace_all(substrate, "[^[:alnum:]]", "_")),
+#                                ".1.jpg"),
+#                 photo_url = paste0("https://storage.googleapis.com/elegansvariation.org/photos/hawaii2017/",
+#                                    c_label,
+#                                    ".jpg"),
+#                 photo_url_thumb =  paste0("https://storage.googleapis.com/elegansvariation.org/photos/hawaii2017/",
+#                                           c_label,
+#                                           ".thumb.jpg")) %>%
+#   dplyr::ungroup()
 # 
 # photo_comms <- df %>% dplyr::mutate(sample_photo = str_split(sample_photo, ",")) %>%
 #   dplyr::select(-s_label) %>%
@@ -511,174 +282,113 @@ df <-df %>% dplyr::rowwise() %>%
 # 
 # writeLines(photo_comms$comm, con = file("scripts/rename_photos.sh"))
 
-# redefine
-cso <- po_slabels
+###################################################################
+### 10: Merge automated blast data                              ###
+###################################################################
 
-# Fold in variables from df to the cso data frame
-cso <- cso %>% dplyr::left_join(
-  df %>% dplyr::select(c_label,
-                       substrate,
-                       landscape,
-                       sky_view,
-                       photo_url,
-                       photo_url_thumb,
-                       altitude,
-                       team,
-                       island,
-                       location,
-                       date,
-                       time,
-                       FOV,
-                       po_created_by,
-                       dplyr::starts_with("grid")),
-  by = "c_label"
-)
+# # Merge in blast data; Take top hit
+# blast_results <- readr::read_tsv("data/sanger/blast_results.tsv") %>%
+#   dplyr::group_by(s_plate) %>%
+#   dplyr::filter(row_number() == 1)
 
-# Merge in blast data; Take top hit
-blast_results <- readr::read_tsv("data/sanger/blast_results.tsv") %>%
-  dplyr::group_by(s_plate) %>%
-  dplyr::filter(row_number() == 1)
+###################################################################
+### 11: Merge manual blast results                              ###
+###################################################################
 
-#==============================#
-# Load manual curation results #
-#==============================#
-cso <- cso %>% dplyr::left_join(blast_results, by = c("s_label" = "s_plate")) %>%
-  dplyr::left_join(
-    googlesheets::gs_key("1bavR10CEyvWt2zBSNBz-ADXx06b1mDFmuvaaM8Uobi4") %>%
-      googlesheets::gs_read("Full", na = c("#N/A", "NA", ""),
-    by = c("c_label", "s_label"))
-  ) %>%
-  dplyr::mutate_at(vars("pcr_rhpositive"), funs(as.numeric))
+# Each collection should have unique gs_key. Your Google Sheet key can be found in your PUBLISHED Google sheets URL.
+# Select the string of data found between the slashes after spreadsheets/d in your Google Sheet URL.
+# use stringr to find s_labels from s_label column
 
-# Fix C-3295
-df[df$c_label == "C-3295", c("longitude", "latitude", "record_longitude", "record_latitude", "date", "datetime")] <- NA
+genotyping_sheet_raw <- googlesheets::gs_key("1TMgx1TRZ4cgRn24eQCzoy378fKcYRgMrYVlrqgMXVQA") %>%
+  googlesheets::gs_read("Sheet1", na = c("#N/A", "NA", ""),
+                        by = c("c_label", "s_label")) %>%
+  dplyr::filter(!is.na(s_label)) %>%
+  # remove c_label variable (this column was hand typed and contains at least 2 errors)
+  dplyr::select(-c_label, s_label, species_id, lysis_date, pcr_date, ITS2_pcr_product, rhabditid_pcr_product, notes)
 
-# Merge in missing c-labels that don't exist in cso but do exist in df
-cso <- cso %>% dplyr::bind_rows(df[colnames(df) %in% colnames(cso)] %>%
-                                           dplyr::filter(!(c_label %in% cso$c_label)))  %>%
-  dplyr::arrange(c_label, s_label) %>%
-  dplyr::mutate(spp_id = ifelse(
-    (pcr_rhpositive == 0) | 
-      ((pcr_rhpositive == 1) & is.na(spp_id)),
-    "Unknown",
-    spp_id)
-  )
+# find s_labels in genotyping sheet
+slabels <- str_subset(genotyping_sheet_raw$s_label, pattern = "S-")
 
-#=================#
-# Data Correction #
-#=================#
+# filter genotyping sheet by s_labels matching "S-" pattern
+genotyping_sheet <- genotyping_sheet_raw %>%
+  dplyr::filter(s_label %in% slabels)
 
-# remove C-3295 because we don't know what happened with that collection
-remove_cso <- cso$c_label == "C-3295"
-cso <- cso[!remove_cso,]
-remove_df <- df$c_label == "C-3295"
-df <- df[!remove_df,]
-
-# correct substrate moisture values less than or equal to zero
-cso <- cso%>%
-  dplyr::mutate(substrate_moisture = ifelse(substrate_moisture <= 0, NA, substrate_moisture))
-df <- df%>%
-  dplyr::mutate(substrate_moisture = ifelse(substrate_moisture <= 0, NA, substrate_moisture))
-
-#====================#
-# Integrate isotypes #
-#====================#
-
-wi_info_sheet <- gs_key("1V6YHzblaDph01sFDI8YK_fP0H7sVebHQTXypGdiQIjI") %>%
-                 gs_read() %>%
-                 dplyr::select(strain, isotype, c_label, s_label)
-
-cso <- cso %>%
-          dplyr::left_join(wi_info_sheet,
-                           by = c("c_label", "s_label")) %>%
-          dplyr::select(isotype, strain, dplyr::everything())
-
-df <- df %>% dplyr::left_join(wi_info_sheet %>%
-                        dplyr::select(-s_label),
-                        by = c('c_label')) %>%
-       dplyr::select(isotype, strain, dplyr::everything())
-
-save(file = "data/fulcrum/df.Rda", df, cso)
-
-#==============================#
-# Generate Supplemental Data 1 #
-#==============================#
-cso %>%
-  dplyr::select(isotype,
-                strain,
-                c_label,
-                s_label,
-                worms_on_sample,
-                approximate_number_of_worms,
-                latitude,
-                longitude,
-                island,
-                substrate,
-                landscape,
-                sky_view,
-                gridsect,
-                gridsect_number = grid_num,
-                gridsect_direction,
-                gridsect_radius,
+# Join genotyping sheet with collection and isolation data
+fulcrum_dat <- df3 %>% 
+  dplyr::full_join(genotyping_sheet) %>%
+  # Rename variables
+  dplyr::rename(project_id = project,
+                collection_id = c_label,
+                isolation_id = s_label) %>%
+  # Reorder variables
+  dplyr::select(project_id,
+                collection_id,
+                isolation_id,
+                species_id,
+                collection_by,
+                collection_datetime_UTC,
+                collection_date_UTC,
+                collection_local_time,
+                collection_island,
+                collection_location,
+                collection_latitude,
+                collection_longitude,
+                collection_fulcrum_latitude,
+                collection_fulcrum_longitude,
+                collection_lat_long_method,
+                collection_lat_long_method_diff,
+                ambient_temperature,
+                flag_ambient_temperature_run,
+                ambient_humidity,
                 substrate_temperature,
                 substrate_moisture,
-                ambient_humidity, 
-                ambient_temperature,
+                fulcrum_altitude,
+                geonames_altitude,
                 altitude,
-                date,
-                time,
-                pcr_positive = pcr_rhpositive,
-                species_id = spp_id,
-                photo_url_thumb) %>%
-  dplyr::mutate(species_id = ifelse(species_id == "C. sp. 53", "C. oiwi", species_id)) %>%
-  dplyr::mutate(fixed_substrate = ifelse(substrate == "Fruit/nut/vegetable", "Fruit",
-                                         ifelse(substrate == "Rotting flower", "Flower",
-                                                ifelse(substrate == "Rotting fungus", "Fungus",
-                                                       ifelse(substrate %in% c("Rotting wood",
-                                                                               "Compost",
-                                                                               "Soil",
-                                                                               "Grass"), 
-                                                              "Vegetation",
-                                                              ifelse(substrate %in% c("Isopod", "Millipede", "Slug"), "Invertebrate", substrate)))))) %>%
-  readr::write_tsv("data/Supplemental Data 1.tsv")
+                altitude_method,
+                altitude_method_diff,
+                landscape,
+                sky_view,
+                substrate,
+                substrate_other,
+                substrate_notes,
+                sample_photo,
+                sample_photo_caption,
+                gridsect,
+                gridsect_index,
+                grid_sect_direction,
+                gridsect_radius,
+                isolation_by,
+                isolation_datetime_UTC,
+                isolation_date_UTC,
+                isolation_local_time,
+                isolation_latitude,
+                isolation_longitude,
+                worms_on_sample,
+                approximate_number_of_worms,
+                lysis_date,
+                pcr_date,
+                ITS2_pcr_product,
+                rhabditid_pcr_product,
+                notes)
 
-# # Write elife supplemental data 1
-# cso %>%
-#   dplyr::select(isotype,
-#                 strain,
-#                 c_label,
-#                 s_label,
-#                 worms_on_sample,
-#                 approximate_number_of_worms,
-#                 latitude,
-#                 longitude,
-#                 island,
-#                 substrate,
-#                 landscape,
-#                 sky_view,
-#                 gridsect,
-#                 gridsect_number = grid_num,
-#                 gridsect_direction,
-#                 gridsect_radius,
-#                 substrate_temperature,
-#                 substrate_moisture,
-#                 ambient_humidity, 
-#                 ambient_temperature,
-#                 altitude,
-#                 date,
-#                 time,
-#                 pcr_positive = pcr_rhpositive,
-#                 species_id = spp_id,
-#                 photo_url_thumb) %>%
-#   dplyr::mutate(species_id = ifelse(species_id == "C. sp. 53", "C. oiwi", species_id)) %>%
-#   dplyr::mutate(fixed_substrate = ifelse(substrate == "Fruit/nut/vegetable", "Fruit",
-#                                          ifelse(substrate == "Rotting flower", "Flower",
-#                                                 ifelse(substrate == "Rotting fungus", "Fungus",
-#                                                        ifelse(substrate %in% c("Rotting wood",
-#                                                                                "Compost",
-#                                                                                "Soil",
-#                                                                                "Grass"), 
-#                                                               "Vegetation",
-#                                                               ifelse(substrate %in% c("Isopod", "Millipede", "Slug"), "Invertebrate", substrate)))))) %>%
-#   dplyr::select(-substrate) %>%
-#   readr::write_csv("data/elife_files/Supplemental_Data_1.csv")
+# export R dataframe
+save(file = "data/fulcrum/fulcrum_dat.Rda", fulcrum_dat)
+
+
+###################################################################
+### 12: Quality control                                         ###
+###################################################################
+
+# Find unpaired s_labels from genotyping sheet
+unpaired_s_labels_from_genotyping <- df4 %>%
+  dplyr::filter(is.na(worms_on_sample)) %>%
+  dplyr::pull(s_label)
+
+# project specific:
+# pull out s_labels with C_label NA (there are 12 s_labels that are not joining properly. Three case types
+# Case 1: (8 instances) of s_lable in genotyping sheet, but not in `nematode_isolation_s_labeled_plates.csv`
+# Case 2: (2 instances) s_lable is present in genotyping sheet and `nematode_isolation_s_labeled_plates.csv`, but paired with different c_label in genoptyping sheet.
+# Case 3: (2 instances) s_lable is present in genotyping sheet and `nematode_isolation_s_labeled_plates.csv`, but c_label is NA in genoptyping sheet.
+# Solution for case 2 & 3 is to remove c_label column before joining. DONE!
+# Solution for case 1. Manually check?
