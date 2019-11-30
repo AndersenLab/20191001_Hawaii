@@ -1,7 +1,7 @@
 ---
 title: "2019OctoberHawaii_report"
 author: "Tim C."
-date: "11/29/2019"
+date: "11/30/2019"
 output:
   html_document:
     toc: true
@@ -19,7 +19,8 @@ library(cowplot)
 library(pals)
 library(grid)
 library(gridExtra)
-library(janitor)
+library(scales)
+library(kableExtra)
 
 #setting working directory
 knitr::opts_knit$set(root.dir = '..')
@@ -180,8 +181,9 @@ knitr::kable(personnel_collectors)
 knitr::kable(personnel_isolators)
 ```
 
-### Collection counts
-```{r, echo=TRUE}
+### collection report (processed)
+```{r, echo=F, warning = F, message=F}
+# Find counts
 collection_counts_1 <- fulcrum_dat %>%
   dplyr::distinct(collection_id, .keep_all = TRUE) %>%
   dplyr::mutate(`total number of distinct collections` = n()) %>%
@@ -192,13 +194,16 @@ collection_counts_1 <- fulcrum_dat %>%
   dplyr::select(worms_on_sample, `total number of distinct collections`:worms_on_sample_counts) %>%
   dplyr::distinct(worms_on_sample, .keep_all = T)
 
+# find more counts
 `total number of distinct collections` <- pull(collection_counts_1 %>% distinct(`total number of distinct collections`))
 `total number of distinct collections NAs removed` <- pull(collection_counts_1 %>% distinct(`total number of distinct collections NAs removed`))
 `collections with nematodes` <- pull(collection_counts_1 %>% dplyr::filter(worms_on_sample == "Yes") %>% distinct(`worms_on_sample_counts`))
 `collections with tracks only` <- pull(collection_counts_1 %>% dplyr::filter(worms_on_sample == "Tracks") %>% distinct(`worms_on_sample_counts`))
 `collections without nematodes`<- pull(collection_counts_1 %>% dplyr::filter(worms_on_sample == "No") %>% distinct(`worms_on_sample_counts`))
 `collections without paired isolation data`<- pull(collection_counts_1 %>% dplyr::filter(worms_on_sample == "?") %>% distinct(`worms_on_sample_counts`))
+`collections with NA for colleciton id` <- pull(fulcrum_dat %>% dplyr::filter(is.na(collection_id)) %>% dplyr::mutate(n = n()) %>% dplyr::distinct(n))
 
+# find duplicate c_labels
 `collections with duplicated ids` <-  fulcrum_dat %>%
   dplyr::filter(!is.na(collection_id)) %>%
   dplyr::distinct(collection_id, isolation_datetime_UTC, .keep_all = T) %>%
@@ -210,41 +215,158 @@ collection_counts_1 <- fulcrum_dat %>%
   dplyr::distinct(num_duplicated) %>%
   pull(num_duplicated)
 
+# Find counts for location and altitude methods
+collection_counts_2 <-  fulcrum_dat %>%
+  dplyr::filter(!is.na(collection_id)) %>%
+  dplyr::distinct(collection_id, .keep_all =T) %>%
+  dplyr::add_count(collection_lat_long_method) %>%
+  dplyr::rename(`location method n` = n) %>%
+  dplyr::add_count(altitude_method) %>%
+  dplyr::rename(`altitude method n` = n) %>%
+  dplyr::select(collection_lat_long_method, `location method n`, altitude_method, `altitude method n`)
+
+`collections with location method 'photo'` <- collection_counts_2 %>% dplyr::filter(collection_lat_long_method == "photo") %>%
+  dplyr::distinct(`location method n`) %>% pull(unique(`location method n`))
+`collection percentage with loc method 'photo'` <- (`collections with location method 'photo'` / `total number of distinct collections NAs removed`)
+
+`collections with location method 'fulcrum'` <- collection_counts_2 %>% dplyr::filter(collection_lat_long_method == "fulcrum") %>%
+  dplyr::distinct(`location method n`) %>% pull(unique(`location method n`))
+`collection percentage with loc method 'fulcrum'` <- (`collections with location method 'fulcrum'` / `total number of distinct collections NAs removed`)
+
+`collections with altitude method 'geonames'` <- collection_counts_2 %>% dplyr::filter(altitude_method == "geonames") %>%
+  dplyr::distinct(`altitude method n`) %>% pull(unique(`altitude method n`))
+`collection percentage with altitude method 'geonames'` <- (`collections with altitude method 'geonames'` / `total number of distinct collections NAs removed`)
+
+`collections with altitude method 'fulcrum'` <- collection_counts_2 %>% dplyr::filter(altitude_method == "fulcrum") %>%
+  dplyr::distinct(`altitude method n`) %>% pull(unique(`altitude method n`))
+`collection percentage with altitude method 'fulcrum'` <- (`collections with altitude method 'fulcrum'` / `total number of distinct collections NAs removed`)
+
+# build data frame to display
 collection_counts <- tibble(`total number of distinct collections`,
-                                `total number of distinct collections NAs removed`,
-                                `collections with nematodes`,
-                                `collections with tracks only`,
-                                `collections without nematodes`,
-                                `collections without paired isolation data`,
-                                `collections with duplicated ids`) %>%
-  
-  
-  column_to_rownames(., loc = 1)
-  
-colnames(collection_counts)
-rownames(collection_counts)
+                            `total number of distinct collections NAs removed`,
+                            `collections with nematodes`,
+                            `collections with tracks only`,
+                            `collections without nematodes`) %>%
+  dplyr::mutate(`collection percentage with nematodes` = (`collections with nematodes`/`total number of distinct collections NAs removed`),
+                `collection percentage with tracks only` = (`collections with tracks only`/`total number of distinct collections NAs removed`),
+                `collection percentage with no worms` = (`collections without nematodes`/`total number of distinct collections NAs removed`)) %>%
+  dplyr::bind_cols(list(`collections with duplicated ids`,
+                   `collections with NA for colleciton id`,
+                   `collections without paired isolation data`,
+                   `collections with location method 'photo'`,
+                   `collections with location method 'fulcrum'`,
+                   `collection percentage with loc method 'photo'`,
+                   `collection percentage with loc method 'fulcrum'`,
+                   `collections with altitude method 'geonames'`,
+                   `collections with altitude method 'fulcrum'`,
+                   `collection percentage with altitude method 'geonames'`,
+                   `collection percentage with altitude method 'fulcrum'`)) %>%
+  dplyr::rename(`collections with duplicated ids` = V1,
+                   `collections with NA for colleciton id` = V2,
+                   `collections without paired isolation data` = V3,
+                   `collections with location method 'photo'` = V4,
+                   `collections with location method 'fulcrum'` = V5,
+                   `collection percentage with loc method 'photo'` = V6,
+                   `collection percentage with loc method 'fulcrum'` = V7,
+                   `collections with altitude method 'geonames'` = V8,
+                   `collections with altitude method 'fulcrum'` = V9,
+                   `collection percentage with altitude method 'geonames'` = V10,
+                   `collection percentage with altitude method 'fulcrum'` = V11) %>%
+  tidyr::gather(`collection report`, value) %>%
+  dplyr::mutate(value = as.numeric(value)) %>%
+  # if percentage in type then display as percentage
+  dplyr::mutate(value = ifelse(str_detect(`collection report`, pattern = "percentage"), percent(value, scale = 100, accuracy = .1, trim = T), as.integer(value)))
 
-
-col
-
-
-`collection fraction with no worms`
-`collection fraction with tracks only`
-`collection fraction with nematodes`
-`collections with location method 'photo'`
-`collections with location method 'fulcrum'`
-`collection fraction with loc method 'photo'`
-`collection fraction with loc method 'fulcrum'`
-`collections with altitude method 'geonames'`
-`collections with altitude method 'fulcrum'`
-`collection fraction with altitude method 'geonames'`
-`collection fraction with altitude method 'fulcrum'`
-
-
-
+# make nice table
+knitr::kable(collection_counts)
 ```
 
-### Collection overview plot
+### isolation report (processed)
+```{r, echo=F, warning = F, message=F}
+# Find counts
+isolation_counts1 <- fulcrum_dat %>%
+ dplyr::distinct(isolation_id, .keep_all = T) %>%
+  dplyr::mutate(`total number of distinct isolations` = n()) %>%
+  dplyr::filter(!is.na(isolation_id)) %>%
+  dplyr::mutate(`total number of distinct isolations NAs removed` = n())
+
+`total number of distinct isolations` <- isolation_counts1 %>% dplyr::distinct(`total number of distinct isolations`) %>% pull(`total number of distinct isolations`)
+
+`total number of distinct isolations NAs removed` <- isolation_counts1 %>% dplyr::distinct(`total number of distinct isolations NAs removed`) %>% pull(`total number of distinct isolations NAs removed`)
+
+`average isolations per collection with worms` <- fulcrum_dat %>%
+  dplyr::filter(!is.na(isolation_id), !is.na(collection_id)) %>%
+  dplyr::group_by(collection_id) %>%
+  dplyr::mutate(num_isolations_for_collection = n()) %>%
+  dplyr::ungroup() %>%
+  dplyr::distinct(collection_id, .keep_all = T) %>%
+  dplyr::mutate(`average isolations per collection with worms` = mean(num_isolations_for_collection)) %>%
+  dplyr::distinct(`average isolations per collection with worms`) %>%
+  dplyr::pull(`average isolations per collection with worms`)
+
+`isolations with duplicated ids` <- fulcrum_dat %>%
+  add_count(isolation_id) %>%
+  dplyr::filter(n > 1 & !is.na(isolation_id)) %>%
+  dplyr::distinct(isolation_id) %>%
+  dplyr::pull(isolation_id) %>%
+  paste(., collapse = ",")
+  
+
+`isolations without paired collection data` <- fulcrum_dat %>%
+  dplyr::filter(is.na(collection_id)) %>%
+  dplyr::mutate(n = n()) %>%
+  dplyr::distinct(isolation_id, .keep_all = T) %>%
+  dplyr::mutate(isolation_unpaired_names = paste(.$isolation_id, collapse =",")) %>%
+  dplyr::distinct(n, .keep_all = T) %>%
+  dplyr::mutate(`isolations without paired collection data` = glue::glue('({.$n} plates) {.$isolation_unpaired_names}')) %>%
+  dplyr::pull(`isolations without paired collection data`)
+  
+# find counts for genotypes
+isolation_counts3 <- fulcrum_dat %>%
+  dplyr::mutate(collection_type = ifelse(worms_on_sample %in% c("No", "?"), "No Nematode",
+                                   ifelse(worms_on_sample == "Tracks", "Tracks only",
+                                          ifelse(worms_on_sample == "Yes" & is.na(ITS2_pcr_product), "Not genotyped",
+                                                 ifelse(worms_on_sample == "Yes" & ITS2_pcr_product == 0, "PCR -",
+                                                       ifelse(species_id %in% c("Chabertia ovina",
+                                                                                "Choriorhabditis cristata",
+                                                                                "Choriorhabditis sp.",
+                                                                                "Heterhabditis zealandica",
+                                                                                "Mesorhabditis sp.",
+                                                                                "no match",
+                                                                                "C. kamaaina",
+                                                                                "Rhabditis terricola",
+                                                                                "Rhanditis tericola",
+                                                                                "Teratorhabditis sp.",
+                                                                                "Unknown",
+                                                                                "unknown",
+                                                                                "Oscheius sp.",
+                                                                                "Panagrolaimus sp.",
+                                                                                "-",
+                                                                                NA),
+                                                              "Other PCR +", species_id)))))) %>%
+  dplyr::select(isolation_id, collection_id, collection_type, collection_island, species_id, ITS2_pcr_product, worms_on_sample, collection_longitude, collection_latitude) %>%
+  dplyr::filter(collection_type != "Tracks only", collection_type != "No Nematode") %>%
+  dplyr::distinct(collection_id, isolation_id, .keep_all=T) %>% 
+  dplyr::add_count(collection_type) %>%
+  dplyr::mutate(total = n()) %>%
+  dplyr::distinct(collection_type, n) %>%
+  dplyr::rename(`isolation report` = collection_type,
+                value = n)
+ 
+# add it all together
+isolation_report <- tibble(`total number of distinct isolations`,
+                          `total number of distinct isolations NAs removed`,
+                          `average isolations per collection with worms`,
+                          `isolations with duplicated ids`,
+                          `isolations without paired collection data`) %>%
+   tidyr::gather(`isolation report`, value) %>%
+  dplyr::full_join(isolation_counts3 %>% dplyr::mutate(value = as.character(value)))
+
+# make nice table
+knitr::kable(isolation_report)
+```
+
+### collection overview plot (processed)
 ```{r, echo=F, warning = F, message=F, fig.width=11, fig.height=7.5}
 # setup overview plot groups
 overview_plot_df <- fulcrum_dat %>%
@@ -347,3 +469,69 @@ overview_plot
 
 ```
 
+### duplications report (raw)
+```{r, echo=F, warning = F, message=F}
+##########################################################################
+# part 1 find duplications in nematode nematode_field_sampling.csv     ###
+##########################################################################
+`duplication in nematode_field_sampling.csv` <- readr::read_csv("data/fulcrum/nematode_field_sampling.csv") %>%
+  add_count(c_label) %>%
+  dplyr::filter(n > 1)
+
+knitr::kable(`duplication in nematode_field_sampling.csv`, caption = glue::glue("duplicated collections in nematode nematode_field_sampling.csv")) %>%
+  kable_styling() %>%
+  scroll_box(width = "100%", height = "200px")
+
+#########################################################################
+# part 2  find duplicate records in nematode_isolation.csv            ###
+#########################################################################
+`duplication in nematode_isolation.csv` <- readr::read_csv("data/fulcrum/nematode_isolation.csv") %>%
+  add_count(fulcrum_id) %>%
+  dplyr::rename(distinct_fulcrum_id_count = n) %>%
+  add_count(c_label) %>%
+  dplyr::rename(distinct_c_label_count = n)
+
+`duplicated isolation ids in nematode_isolation.csv` <-  `duplication in nematode_isolation.csv` %>% dplyr::filter(distinct_fulcrum_id_count >1)
+knitr::kable(`duplicated isolation ids in nematode_isolation.csv`, caption = "duplicated isolation ids in nematode_isolation.csv") %>%
+  kable_styling() %>%
+  scroll_box(width = "100%", height = "200px")
+
+`duplicated isolations for same collection` <- `duplication in nematode_isolation.csv` %>% dplyr::filter(distinct_c_label_count >1)
+knitr::kable(`duplicated isolations for same collection`, caption = glue::glue("{`duplicated isolations for same collection` %>% dplyr::distinct(c_label) %>% dplyr::mutate(pull_n = n()) %>% dplyr::distinct(pull_n) %>% dplyr::pull(pull_n)} collections with duplicated isolations in nematode_isolation.csv")) %>%
+  kable_styling() %>%
+  scroll_box(width = "100%", height = "200px")
+
+#########################################################################
+# part 3 find duplications in nematode isolation_s_labeled_plates.csv ###
+#########################################################################
+`duplication in nematode_isolation_s_labeled_plates.csv` <- readr::read_csv("data/fulcrum/nematode_isolation_s_labeled_plates.csv") %>%
+  add_count(s_label) %>%
+  dplyr::filter(n > 1)
+knitr::kable(`duplication in nematode_isolation_s_labeled_plates.csv`, caption = "duplication in nematode_isolation_s_labeled_plates.csv") %>%
+  kable_styling() %>%
+  scroll_box(width = "100%", height = "200px")
+
+#########################################################################
+# part 4 find duplication in genotyping google sheet                  ###
+#########################################################################
+# you will have to find the genotyping sheet specific to this collection trip for this code to work. Paste the PUBLISHED googlesheet URL in gs_key below.
+`duplication in genotyping sheet` <- googlesheets::gs_key("1TMgx1TRZ4cgRn24eQCzoy378fKcYRgMrYVlrqgMXVQA") %>%
+  googlesheets::gs_read("Sheet1", na = c("#N/A", "NA", ""),
+                        by = c("c_label", "s_label")) %>%
+  dplyr::filter(!is.na(s_label)) %>%
+  # remove c_label variable (this column was hand typed and contains at least 2 errors)
+  dplyr::select(-c_label, s_label, species_id, lysis_date, pcr_date, ITS2_pcr_product, rhabditid_pcr_product, notes) %>%
+  add_count(s_label) %>%
+  dplyr::filter(n > 1)
+
+# find s_labels in genotyping sheet
+slabels <- str_subset(`duplication in genotyping sheet`$s_label, pattern = "S-")
+
+# filter genotyping sheet by s_labels matching "S-" pattern
+`duplication in genotyping sheet` <- `duplication in genotyping sheet` %>%
+  dplyr::filter(s_label %in% slabels)
+knitr::kable(`duplication in genotyping sheet`, caption = "duplication in genotyping sheet") %>%
+  kable_styling() %>%
+  scroll_box(width = "100%", height = "200px")
+```
+<br> These dataframes are filtered to show the duplications in the raw data from fulcrum or the genotyping sheet. If the dataframe are empty there is no duplication.
