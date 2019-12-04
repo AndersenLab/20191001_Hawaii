@@ -1,7 +1,7 @@
 ---
 title: "2019OctoberHawaii_report"
 author: "Tim C."
-date: "11/30/2019"
+date: "12/4/2019"
 output:
   html_document:
     toc: true
@@ -21,6 +21,9 @@ library(grid)
 library(gridExtra)
 library(scales)
 library(kableExtra)
+library(leaflet)
+library(htmlwidgets)
+library(htmltools)
 
 #setting working directory
 knitr::opts_knit$set(root.dir = '..')
@@ -30,7 +33,9 @@ knitr::opts_knit$set(root.dir = '..')
 # load fulcrum data
 load('data/fulcrum/fulcrum_dat.Rda')
 
-# set color palettes
+#################################################
+### set color palettes                        ###
+#################################################
 species_palette <- c("C. elegans" = "#BE0032", #7
                      #"C. oiwi" =  "#875692", #4 
                      "C. tropicalis" = "#F38400", #5 
@@ -49,17 +54,20 @@ island_palette <- c("Kauai" = "#E69F00",
                     "Maui" = "#F0E442",
                     "Big Island" = "#D55E00")
 
-####################################################
-#  A: Define Functions                             #
-####################################################
+#################################################
+### Define Functions                          ###
+#################################################
+# function used in map_overview to set as numeric
 as.numeric.factor <- function(x) {as.numeric(levels(x))[x]}
 
+# Function for setting islands 
 filter_box <- function(longitude, latitude, coords) {
   between(longitude, coords[1], coords[3]) &
     between(latitude, coords[2], coords[4]) &
     !is.na(longitude)
 }
 
+# coordinates for islands. Note need to comment out islands not collected from in this list
 islands = list(  "Kauai" = c(-159.830818,21.750571,-159.230003,22.350076),
   "Oahu" = c(-158.323116,21.112767,-157.623081,21.814254),
   #"Molokai" = c(-157.3515,20.793,-156.6515,21.4956),
@@ -67,16 +75,16 @@ islands = list(  "Kauai" = c(-159.830818,21.750571,-159.230003,22.350076),
   "Big Island" = c(-156.3651,18.8049,-154.765,20.4064)
 )
 
+#gtmap function for map_overview function
 gtmap <- function(loc) {
   get_map(location = loc,
           maptype = "terrain-background",
           source = "stamen",
           scale = "auto")
 }
-
 mget_map <- memoise(gtmap)
 
-# NOTE: You must set islands to what was sampled in 
+# NOTE: You must configure set_islands to what was sampled in this project for this script to work (see lines150 - 163).
 # Overview map plotting function
 map_overview <- function(F, label, cso, geoms, face = "plain") {
   island_set = lapply(names(islands), function(i) {
@@ -164,6 +172,54 @@ map_overview <- function(F, label, cso, geoms, face = "plain") {
   
   cowplot::plot_grid(without_label, label, nrow = 2, rel_heights = c(1, .05))
 }
+
+# Map_collection function for reviewing collection locations
+map_collection <- function(df, color_use) {
+  
+  icos <- iconList(
+    red = makeIcon(
+      iconUrl = paste0("https://storage.googleapis.com/andersenlab.org/img/red.svg"),
+      iconWidth = 20, iconHeight = 20,
+      popupAnchorX = 0.001, popupAnchorY = -20,
+      iconAnchorX = 20/2, iconAnchorY = 20
+    ),
+    green = makeIcon(
+      iconUrl = paste0("https://storage.googleapis.com/andersenlab.org/img/green.svg"),
+      iconWidth = 10, iconHeight = 10,
+      popupAnchorX = 0.001, popupAnchorY = -10,
+      iconAnchorX = 10/2, iconAnchorY = 10
+  )
+)
+  df <- dplyr::filter(df, !is.na(df[[color_use]])) %>%
+    dplyr::mutate(substrate=ifelse(is.na(substrate), "", substrate)) %>%
+    dplyr::arrange(collection_lat_long_method)
+  
+  #print(df)
+ 
+  
+  attach(df)
+  leaflet::leaflet(data = df, width = "100%", options = list(zoomControl = T)) %>% 
+    leaflet::addTiles( 
+      paste0( 
+        "https://stamen-tiles-{s}.a.ssl.fastly.net/terrain/{z}/{x}/{y}.png",
+        jsonlite::read_json("data/thunderforest.json")$key)  
+    ) %>%
+    leaflet::addMarkers(~collection_longitude,
+                        ~collection_latitude,
+                        popup = glue::glue("<h2>{collection_id}</h2><hr />
+                                           <strong>collection uplaoded by:</strong> {collection_by}<br />
+                                           <strong>latitidue, longitude:</strong> {format(round(collection_latitude, 6), nsmall = 6)}, {format(round(collection_longitude, 6), nsmall = 6)}<br />
+                                           <strong>postion method used:</strong> {collection_lat_long_method}<br />
+                                           <strong>local time:</strong> {collection_local_time}<br />
+                                           <strong>altitude:</strong> {altitude} meters<br />
+                                           <strong>landscape:</strong> {landscape}<br /><br />"),
+                        popupOptions(maxWidth = 500),
+                        icon = icos[ df[[color_use]] ] )
+  
+  #htmlwidgets::saveWidget(m, tempfile(), selfcontained = FALSE)
+  #webshot::webshot("temp.html", file = "map.png",
+  #        cliprect = "viewport", vwidth = 1000, vheight = 1000)
+}
 ```
 
 ### Personnel
@@ -180,8 +236,26 @@ personnel_isolators <- data.frame(isolators)
 knitr::kable(personnel_collectors)
 knitr::kable(personnel_isolators)
 ```
+<br>
 
-### collection report (processed)
+### Review locations
+```{r, echo=F, warning = F, message=F}
+# Make df for diagnostic plotting
+test_df <- fulcrum_dat %>%
+  dplyr::filter(!is.na(collection_id)) %>%
+  dplyr::distinct(collection_id, .keep_all =T)
+
+# map collection for diagnostic
+diagnostic_map <-  map_collection(test_df %>% dplyr::mutate(color = case_when(collection_lat_long_method == "fulcrum" ~ "red",
+                                                                              collection_lat_long_method == "photo" ~ "green")), "color")
+
+diagnostic_map
+```
+Use this map to manually check latitidue and longitude of collection records.
+<br> <font color="darkred">*Red points*</font> are located using `fulcrum` lat,long and may need to be corrected.
+<br> <font color="darkgreen">*Green points*</font> are located using `photo` lat,long and are usually accurate.
+
+### collection report
 ```{r, echo=F, warning = F, message=F}
 # Find counts
 collection_counts_1 <- fulcrum_dat %>%
@@ -281,7 +355,7 @@ collection_counts <- tibble(`total number of distinct collections`,
 knitr::kable(collection_counts)
 ```
 
-### isolation report (processed)
+### isolation report
 ```{r, echo=F, warning = F, message=F}
 # Find counts
 isolation_counts1 <- fulcrum_dat %>%
@@ -366,7 +440,127 @@ isolation_report <- tibble(`total number of distinct isolations`,
 knitr::kable(isolation_report)
 ```
 
-### collection overview plot (processed)
+### duplications report
+```{r, echo=F, warning = F, message=F}
+##########################################################################
+# part 1 find duplications in nematode nematode_field_sampling.csv     ###
+##########################################################################
+`duplication in nematode_field_sampling.csv` <- readr::read_csv("data/fulcrum/nematode_field_sampling.csv") %>%
+  add_count(c_label) %>%
+  dplyr::filter(n > 1)
+
+n_duplicated_field_sampling <- `duplication in nematode_field_sampling.csv` %>%
+  #conditional pipe to return NA if dataframe is empty and move on to count c_labels if not empty.
+    {if (nrow(.) == 0) return(0) else (.) %>%
+  dplyr::distinct(c_label) %>%
+  dplyr::mutate(pull_n = n()) %>%
+  dplyr::distinct(pull_n) %>%
+  dplyr::pull(pull_n)
+    }
+
+knitr::kable(`duplication in nematode_field_sampling.csv`, caption = glue::glue("{n_duplicated_field_sampling} c_label(s) duplicated in nematode_field_sampling.csv")) %>%
+  kable_styling() %>%
+  scroll_box(width = "100%", height = "200px")
+
+#########################################################################
+# part 2  find duplicate records in nematode_isolation.csv            ###
+#########################################################################
+`duplication in nematode_isolation.csv` <- readr::read_csv("data/fulcrum/nematode_isolation.csv") %>%
+  add_count(fulcrum_id) %>%
+  dplyr::rename(distinct_fulcrum_id_count = n) %>%
+  add_count(c_label) %>%
+  dplyr::rename(distinct_c_label_count = n)
+
+# get count of duplicated isolation ids
+n_duplicated_isolations <- `duplication in nematode_isolation.csv` %>%
+  dplyr::filter(distinct_fulcrum_id_count > 1) %>%
+  #conditional pipe to return NA if dataframe is empty and move on to count fulcrum_ids if not empty.
+    {if (nrow(.) == 0) return(0) else (.) %>%
+  dplyr::distinct(fulcrum_id) %>%
+  dplyr::mutate(pull_n = n()) %>%
+  dplyr::distinct(pull_n) %>%
+  dplyr::pull(pull_n)
+    }
+
+`duplicated isolation ids in nematode_isolation.csv` <-  `duplication in nematode_isolation.csv` %>% dplyr::filter(distinct_fulcrum_id_count >1)
+knitr::kable(`duplicated isolation ids in nematode_isolation.csv`, caption = glue::glue("{n_duplicated_isolations} isolation id(s) duplicated in nematode_isolation.csv")) %>%
+  kable_styling() %>%
+  scroll_box(width = "100%", height = "200px")
+
+# get count of multiple isolation ids for a single collection
+n_multiple_isolations_for_collection <- `duplication in nematode_isolation.csv` %>%
+  dplyr::filter(distinct_c_label_count > 1) %>%
+  #conditional pipe to return NA if dataframe is empty and move on to count c_labels if not empty. Need (.) b/c you can't have . alone on the left side of a pipe!
+    {if (nrow(.) == 0) return(0) else (.) %>%
+  dplyr::distinct(c_label) %>%
+  dplyr::mutate(pull_n = n()) %>%
+  dplyr::distinct(pull_n) %>%
+  dplyr::pull(pull_n)
+    }
+    
+`duplicated isolations for same collection` <- `duplication in nematode_isolation.csv` %>% dplyr::filter(distinct_c_label_count >1)
+knitr::kable(`duplicated isolations for same collection`, caption = glue::glue("{n_multiple_isolations_for_collection} collection(s) with duplicated isolations in nematode_isolation.csv")) %>%
+  kable_styling() %>%
+  scroll_box(width = "100%", height = "200px")
+
+#########################################################################
+# part 3 find duplications in nematode isolation_s_labeled_plates.csv ###
+#########################################################################
+`duplication in nematode_isolation_s_labeled_plates.csv` <- readr::read_csv("data/fulcrum/nematode_isolation_s_labeled_plates.csv") %>%
+  add_count(s_label) %>%
+  dplyr::filter(n > 1)
+
+# get count of duplicated isolations in nematode isolation_s_labeled_plates.csv
+n_duplicated_isolations_s_labeled_plates <- `duplication in nematode_isolation_s_labeled_plates.csv` %>%
+  #conditional pipe to return NA if dataframe is empty and move on to count s_labels if not empty. Need (.) b/c you can't have . alone on the left side of a pipe!
+    {if (nrow(.) == 0) return(0) else (.) %>%
+  dplyr::distinct(s_label) %>%
+  dplyr::mutate(pull_n = n()) %>%
+  dplyr::distinct(pull_n) %>%
+  dplyr::pull(pull_n)
+    }
+
+knitr::kable(`duplication in nematode_isolation_s_labeled_plates.csv`, caption =  glue::glue("{n_duplicated_isolations_s_labeled_plates} s_label(s) duplicated in nematode_isolation_s_labeled_plates.csv")) %>%
+  kable_styling() %>%
+  scroll_box(width = "100%", height = "200px")
+
+#########################################################################
+# part 4 find duplication in genotyping google sheet                  ###
+#########################################################################
+# you will have to find the genotyping sheet specific to this collection trip for this code to work. Paste the PUBLISHED googlesheet URL in gs_key below.
+`duplication in genotyping sheet` <- googlesheets::gs_key("1TMgx1TRZ4cgRn24eQCzoy378fKcYRgMrYVlrqgMXVQA") %>%
+  googlesheets::gs_read("Sheet1", na = c("#N/A", "NA", ""),
+                        by = c("c_label", "s_label")) %>%
+  dplyr::filter(!is.na(s_label)) %>%
+  # remove c_label variable (this column was hand typed and contains at least 2 errors)
+  dplyr::select(-c_label, s_label, species_id, lysis_date, pcr_date, ITS2_pcr_product, rhabditid_pcr_product, notes) %>%
+  add_count(s_label) %>%
+  dplyr::filter(n > 1)
+
+# find s_labels in genotyping sheet
+slabels <- str_subset(`duplication in genotyping sheet`$s_label, pattern = "S-")
+
+# filter genotyping sheet by s_labels matching "S-" pattern
+`duplication in genotyping sheet` <- `duplication in genotyping sheet` %>%
+  dplyr::filter(s_label %in% slabels)
+
+# get count of duplicated isolations in genotyping sheet
+n_duplicated_isolations_genotyping <- `duplication in genotyping sheet` %>%
+  #conditional pipe to return NA if dataframe is empty and move on to count s_labels if not empty. Need (.) b/c you can't have . alone on the left side of a pipe!
+    {if (nrow(.) == 0) return(0) else (.) %>%
+  dplyr::distinct(s_label) %>%
+  dplyr::mutate(pull_n = n()) %>%
+  dplyr::distinct(pull_n) %>%
+  dplyr::pull(pull_n)
+    }
+
+knitr::kable(`duplication in genotyping sheet`, caption = glue::glue("{n_duplicated_isolations_genotyping} s_label(s) duplicated in genotyping sheet")) %>%
+  kable_styling() %>%
+  scroll_box(width = "100%", height = "200px")
+```
+<br> These dataframes are filtered to show the duplications in the raw data from fulcrum or the genotyping sheet. If the dataframe are empty there is no duplication.
+
+### project overview
 ```{r, echo=F, warning = F, message=F, fig.width=11, fig.height=7.5}
 # setup overview plot groups
 overview_plot_df <- fulcrum_dat %>%
@@ -468,70 +662,3 @@ overview_plot <- map_overview(plot_bar_chart_no_legend, plot_bar_chart_legend, o
 overview_plot
 
 ```
-
-### duplications report (raw)
-```{r, echo=F, warning = F, message=F}
-##########################################################################
-# part 1 find duplications in nematode nematode_field_sampling.csv     ###
-##########################################################################
-`duplication in nematode_field_sampling.csv` <- readr::read_csv("data/fulcrum/nematode_field_sampling.csv") %>%
-  add_count(c_label) %>%
-  dplyr::filter(n > 1)
-
-knitr::kable(`duplication in nematode_field_sampling.csv`, caption = glue::glue("duplicated collections in nematode nematode_field_sampling.csv")) %>%
-  kable_styling() %>%
-  scroll_box(width = "100%", height = "200px")
-
-#########################################################################
-# part 2  find duplicate records in nematode_isolation.csv            ###
-#########################################################################
-`duplication in nematode_isolation.csv` <- readr::read_csv("data/fulcrum/nematode_isolation.csv") %>%
-  add_count(fulcrum_id) %>%
-  dplyr::rename(distinct_fulcrum_id_count = n) %>%
-  add_count(c_label) %>%
-  dplyr::rename(distinct_c_label_count = n)
-
-`duplicated isolation ids in nematode_isolation.csv` <-  `duplication in nematode_isolation.csv` %>% dplyr::filter(distinct_fulcrum_id_count >1)
-knitr::kable(`duplicated isolation ids in nematode_isolation.csv`, caption = "duplicated isolation ids in nematode_isolation.csv") %>%
-  kable_styling() %>%
-  scroll_box(width = "100%", height = "200px")
-
-`duplicated isolations for same collection` <- `duplication in nematode_isolation.csv` %>% dplyr::filter(distinct_c_label_count >1)
-knitr::kable(`duplicated isolations for same collection`, caption = glue::glue("{`duplicated isolations for same collection` %>% dplyr::distinct(c_label) %>% dplyr::mutate(pull_n = n()) %>% dplyr::distinct(pull_n) %>% dplyr::pull(pull_n)} collections with duplicated isolations in nematode_isolation.csv")) %>%
-  kable_styling() %>%
-  scroll_box(width = "100%", height = "200px")
-
-#########################################################################
-# part 3 find duplications in nematode isolation_s_labeled_plates.csv ###
-#########################################################################
-`duplication in nematode_isolation_s_labeled_plates.csv` <- readr::read_csv("data/fulcrum/nematode_isolation_s_labeled_plates.csv") %>%
-  add_count(s_label) %>%
-  dplyr::filter(n > 1)
-knitr::kable(`duplication in nematode_isolation_s_labeled_plates.csv`, caption = "duplication in nematode_isolation_s_labeled_plates.csv") %>%
-  kable_styling() %>%
-  scroll_box(width = "100%", height = "200px")
-
-#########################################################################
-# part 4 find duplication in genotyping google sheet                  ###
-#########################################################################
-# you will have to find the genotyping sheet specific to this collection trip for this code to work. Paste the PUBLISHED googlesheet URL in gs_key below.
-`duplication in genotyping sheet` <- googlesheets::gs_key("1TMgx1TRZ4cgRn24eQCzoy378fKcYRgMrYVlrqgMXVQA") %>%
-  googlesheets::gs_read("Sheet1", na = c("#N/A", "NA", ""),
-                        by = c("c_label", "s_label")) %>%
-  dplyr::filter(!is.na(s_label)) %>%
-  # remove c_label variable (this column was hand typed and contains at least 2 errors)
-  dplyr::select(-c_label, s_label, species_id, lysis_date, pcr_date, ITS2_pcr_product, rhabditid_pcr_product, notes) %>%
-  add_count(s_label) %>%
-  dplyr::filter(n > 1)
-
-# find s_labels in genotyping sheet
-slabels <- str_subset(`duplication in genotyping sheet`$s_label, pattern = "S-")
-
-# filter genotyping sheet by s_labels matching "S-" pattern
-`duplication in genotyping sheet` <- `duplication in genotyping sheet` %>%
-  dplyr::filter(s_label %in% slabels)
-knitr::kable(`duplication in genotyping sheet`, caption = "duplication in genotyping sheet") %>%
-  kable_styling() %>%
-  scroll_box(width = "100%", height = "200px")
-```
-<br> These dataframes are filtered to show the duplications in the raw data from fulcrum or the genotyping sheet. If the dataframe are empty there is no duplication.

@@ -185,6 +185,14 @@ df2 <- readr::read_csv("data/fulcrum/nematode_isolation_s_labeled_plates.csv") %
   # set S-labels to NA if isolation entry is 'no plates' there is 1 instance of this.
   dplyr::mutate(s_label = ifelse(s_label == "no plates", NA, s_label))
 
+# OPTIONAL: remove duplicated s_label
+df2 <- df2 %>%
+  # add a count of row number to grouping variable to remove duplicate s_label (S-0298).
+  dplyr::group_by(s_label) %>%
+  dplyr::mutate(n = row_number()) %>%
+  dplyr::mutate(n = ifelse(is.na(s_label), NA, n)) %>%
+  dplyr::filter(is.na(n) | n == "1")
+
 ###################################################################
 ### 6: Handle Substrates                                        ###
 ###################################################################
@@ -313,6 +321,8 @@ slabels <- str_subset(genotyping_sheet_raw$s_label, pattern = "S-")
 genotyping_sheet <- genotyping_sheet_raw %>%
   dplyr::filter(s_label %in% slabels)
 
+# Remove any duplicated s_labels. We removed duplicated s_labels in genotyping sheet (S-0374, S-0382, S-0381).
+
 # Join genotyping sheet with collection and isolation data
 fulcrum_dat <- df3 %>% 
   dplyr::full_join(genotyping_sheet) %>%
@@ -320,6 +330,8 @@ fulcrum_dat <- df3 %>%
   dplyr::rename(project_id = project,
                 collection_id = c_label,
                 isolation_id = s_label) %>%
+  # Fill project_id variable incase there are NAs introduced
+  tidyr::fill(project_id) %>%
   # Reorder variables
   dplyr::select(project_id,
                 collection_id,
@@ -377,18 +389,22 @@ save(file = "data/fulcrum/fulcrum_dat.Rda", fulcrum_dat)
 
 
 ###################################################################
-### 12: Quality control                                         ###
+### 12: project specific report                                 ###
 ###################################################################
 
-# Find unpaired s_labels from genotyping sheet
-unpaired_s_labels_from_genotyping <- df4 %>%
-  dplyr::filter(is.na(worms_on_sample)) %>%
-  dplyr::pull(s_label)
-
-# project specific:
+######################
+### Issue 1        ###
+######################
 # pull out s_labels with C_label NA (there are 12 s_labels that are not joining properly. Three case types
 # Case 1: (8 instances) of s_lable in genotyping sheet, but not in `nematode_isolation_s_labeled_plates.csv`
 # Case 2: (2 instances) s_lable is present in genotyping sheet and `nematode_isolation_s_labeled_plates.csv`, but paired with different c_label in genoptyping sheet.
 # Case 3: (2 instances) s_lable is present in genotyping sheet and `nematode_isolation_s_labeled_plates.csv`, but c_label is NA in genoptyping sheet.
 # Solution for case 2 & 3 is to remove c_label column before joining. DONE!
 # Solution for case 1. Manually check?
+#####################
+### Issue 2       ###
+#####################
+# S-0298 is duplicated in neamtode_isolation_S_labeled_plates.csv
+# removed the duplkicate in step 5 joining c_labels with s_lables.
+
+
