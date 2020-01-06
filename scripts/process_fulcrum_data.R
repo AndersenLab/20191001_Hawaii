@@ -312,16 +312,20 @@ genotyping_sheet_raw <- googlesheets::gs_key("1TMgx1TRZ4cgRn24eQCzoy378fKcYRgMrY
                         by = c("c_label", "s_label")) %>%
   dplyr::filter(!is.na(s_label)) %>%
   # remove c_label variable (this column was hand typed and contains at least 2 errors)
-  dplyr::select(-c_label, s_label, species_id, lysis_date, pcr_date, ITS2_pcr_product, rhabditid_pcr_product, notes)
+  dplyr::select(-c_label, s_label, species_id_ITS2, lysis_date, pcr_date, ITS2_pcr_product, rhabditid_pcr_product, notes)
 
 # find s_labels in genotyping sheet
 slabels <- str_subset(genotyping_sheet_raw$s_label, pattern = "S-")
 
 # filter genotyping sheet by s_labels matching "S-" pattern
 genotyping_sheet <- genotyping_sheet_raw %>%
-  dplyr::filter(s_label %in% slabels)
+  dplyr::filter(s_label %in% slabels) %>%
+  #rename thespecies_if_ITS2 column to species_id
+  dplyr::rename(species_id = species_id_ITS2)
 
 # Remove any duplicated s_labels. We removed duplicated s_labels in genotyping sheet (S-0374, S-0382, S-0381).
+
+# Assign species ID from 
 
 # Join genotyping sheet with collection and isolation data
 fulcrum_dat <- df3 %>% 
@@ -387,7 +391,6 @@ fulcrum_dat <- df3 %>%
 # export R dataframe
 save(file = "data/fulcrum/fulcrum_dat.Rda", fulcrum_dat)
 
-
 ###################################################################
 ### 12: project specific report                                 ###
 ###################################################################
@@ -399,12 +402,13 @@ save(file = "data/fulcrum/fulcrum_dat.Rda", fulcrum_dat)
 # Case 1: (8 instances) of s_lable in genotyping sheet, but not in `nematode_isolation_s_labeled_plates.csv`
 # Case 2: (2 instances) s_lable is present in genotyping sheet and `nematode_isolation_s_labeled_plates.csv`, but paired with different c_label in genoptyping sheet.
 # Case 3: (2 instances) s_lable is present in genotyping sheet and `nematode_isolation_s_labeled_plates.csv`, but c_label is NA in genoptyping sheet.
-# Solution for case 2 & 3 is to remove c_label column before joining. DONE!
-# Solution for case 1. Manually check?
+# Solution: for case 2 & 3 is to remove c_label column from genotyping sheet before joining. DONE!
+# Solution: for case 1. No solution yet. 
+
 #####################
 ### Issue 2       ###
 #####################
 # S-0298 is duplicated in neamtode_isolation_S_labeled_plates.csv
-# removed the duplkicate in step 5 joining c_labels with s_lables.
+# Solution: Removed the duplicate in step 5 joining c_labels with s_lables.
 
 

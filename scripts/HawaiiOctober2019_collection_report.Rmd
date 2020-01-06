@@ -385,7 +385,6 @@ isolation_counts1 <- fulcrum_dat %>%
   dplyr::pull(isolation_id) %>%
   paste(., collapse = ",")
   
-
 `isolations without paired collection data` <- fulcrum_dat %>%
   dplyr::filter(is.na(collection_id)) %>%
   dplyr::mutate(n = n()) %>%
@@ -439,6 +438,7 @@ isolation_report <- tibble(`total number of distinct isolations`,
 # make nice table
 knitr::kable(isolation_report)
 ```
+**NOTE:** 2 *C. elegans* isolations do not have paired collection data. If we include these isolations there are 8 *C. elegans* isolated not 6.
 
 ### duplications report
 ```{r, echo=F, warning = F, message=F}
@@ -533,7 +533,7 @@ knitr::kable(`duplication in nematode_isolation_s_labeled_plates.csv`, caption =
                         by = c("c_label", "s_label")) %>%
   dplyr::filter(!is.na(s_label)) %>%
   # remove c_label variable (this column was hand typed and contains at least 2 errors)
-  dplyr::select(-c_label, s_label, species_id, lysis_date, pcr_date, ITS2_pcr_product, rhabditid_pcr_product, notes) %>%
+  dplyr::select(-c_label, s_label, species_id_ITS2, species_id_rhabditid, lysis_date, pcr_date, ITS2_pcr_product, rhabditid_pcr_product, notes) %>%
   add_count(s_label) %>%
   dplyr::filter(n > 1)
 
@@ -558,7 +558,13 @@ knitr::kable(`duplication in genotyping sheet`, caption = glue::glue("{n_duplica
   kable_styling() %>%
   scroll_box(width = "100%", height = "200px")
 ```
-<br> These dataframes are filtered to show the duplications in the raw data from fulcrum or the genotyping sheet. If the dataframe are empty there is no duplication.
+<br> These dataframes are filtered to show the duplications in the raw data from fulcrum or the genotyping sheet. If the dataframe are empty there is no duplication. <br>
+**Duplication issue 1:** 9 collections were two separate isolation records exist for the same c_label.<br>
+**Solution:** Retained the isolation record based on worm presence. Yes > tracks > no.<br>
+If both isolation records indicate "tracks only" or "no" then we retain the earliest record.<br>
+In no cases did both isolation records indicate worms were present on c_label.<br>
+**Duplication issue 2:** 1 s_label duplicated in the `nematode_isolation_s_labeled_plates.csv`. <br>
+**Solution:** This duplication is removed in `step 5` of process fulcrum script. <br>
 
 ### project overview
 ```{r, echo=F, warning = F, message=F, fig.width=11, fig.height=7.5}

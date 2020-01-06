@@ -1,0 +1,144 @@
+---
+title: "Sanger Sequencing Summary"
+author: "Daniel Cook"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: united
+    toc: yes
+    toc_float:
+      collapsed: false
+---
+
+```{r setup, include=FALSE}
+source("_setup.R")
+
+cso <- cso %>% dplyr::filter(!is.na(evalue)) %>%
+       dplyr::mutate(percent_identity = identity / align_len) %>%
+       dplyr::mutate(nlog10_evalue = -log10(evalue))
+```
+
+## Species Identified by C-plate
+
+```{r}
+
+cso %>% 
+  dplyr::select(c_label, sciname) %>%
+  dplyr::distinct() %>% 
+  dplyr::group_by(sciname) %>%
+  dplyr::summarise(`C-plate` = n()) %>%
+  dplyr::left_join(
+    cso %>% 
+  dplyr::group_by(sciname) %>%
+  dplyr::summarise(`S-plate` = n())
+  ) %>% kable()
+
+```
+
+
+## C-plates with multiple species
+
+```{r summarize}
+
+cso %>% dplyr::group_by(c_label) %>%
+  dplyr::mutate(n_species = length(unique(sciname))) %>%
+  dplyr::select(c_label, s_label, n_species) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(n_species) %>%
+  dplyr::summarise(N = sum(n_species)) %>%
+  dplyr::rename(`# Species` = n_species) %>% knitr::kable()
+
+```
+
+## _C. elegans_ by island
+
+```{r}
+
+cso %>% 
+  dplyr::select(c_label, island, sciname) %>%
+  dplyr::distinct() %>% 
+  dplyr::group_by(island, sciname) %>%
+  dplyr::summarise(`C-plate` = n()) %>%
+  dplyr::left_join(
+    cso %>% 
+  dplyr::group_by(island, sciname) %>%
+  dplyr::summarise(`S-plate` = n())
+  ) %>%
+  dplyr::filter(sciname == "Caenorhabditis elegans") %>%
+  dplyr::select(`C-plate`, `S-plate`, island, -sciname) %>% kable()
+
+
+```
+
+## _C. elegans_ Distribution
+
+```{r}
+species_plot = cso %>% 
+  dplyr::distinct() %>%
+  dplyr::mutate(color = case_when(sciname == "Caenorhabditis elegans" ~ "green",
+                                  TRUE ~ "")) %>%
+  dplyr::filter(color != "")
+
+map_collection(species_plot , "color")
+
+```
+
+
+## Species Distribution
+
+```{r}
+
+# Plot species
+species_plot = cso %>% 
+  dplyr::distinct() %>%
+  dplyr::mutate(color = case_when(sciname == "Caenorhabditis elegans" ~ "green",
+                                  sciname == "Caenorhabditis briggsae" ~ "red",
+                                  sciname == "Caenorhabditis tropicalis" ~ "lred",
+                                  sciname == "Caenorhabditis sp. 15 KK-2011" ~ "orange",
+                                  sciname == "Oscheius tipulae" ~ "blue",
+                                  sciname == "Oscheius myriophila" ~ "lblue",
+                                  sciname == "Panagrolaimus cf. rigidus AF40" ~ "grey",
+                                  TRUE ~ "")) %>%
+  dplyr::filter(color != "")
+
+map_collection(species_plot , "color")
+
+```
+
+<h4>Species</h4>
+<div><img src='https://storage.googleapis.com/andersenlab.org/img/green.svg' width='20px'> _C. elegans_</div>
+<div><img src='https://storage.googleapis.com/andersenlab.org/img/red.svg' width='20px'> _C. briggsae_</div>
+<div><img src='https://storage.googleapis.com/andersenlab.org/img/lred.svg' width='20px'> _C. tropicalis_</div>
+<div><img src='https://storage.googleapis.com/andersenlab.org/img/orange.svg' width='20px'> _C. sp. 15 KK-2011_</div>
+<div><img src='https://storage.googleapis.com/andersenlab.org/img/blue.svg' width='20px'> _O. tipulae_</div>
+<div><img src='https://storage.googleapis.com/andersenlab.org/img/lblue.svg' width='20px'> _O. myriophila_</div>
+<div><img src='https://storage.googleapis.com/andersenlab.org/img/grey.svg' width='20px'> _P. cf. rigidus AF40_</div>
+
+## Blast Alignments
+
+```{r}
+
+ggplot(cso) +
+  geom_histogram(aes(x = nlog10_evalue)) +
+  labs(x = "-log10(e-value)", y= "Count", caption="Does not include when e-value==0")
+
+
+ggplot(cso) +
+  geom_histogram(aes(x = percent_identity)) +
+  labs(x = "% Identity", y= "Count")
+
+
+```
+
+Sanger seqeunces below have poor percent identity and should be followed up on. Luckily not many _C. elegans_.
+
+```{r}
+
+cso %>% 
+  dplyr::select(c_label, s_label, nlog10_evalue, percent_identity, sciname) %>%
+  dplyr::arrange(percent_identity) %>%
+  dplyr::rename(`-log10(e-value)` = nlog10_evalue, `% Identity` = percent_identity) %>%
+  dplyr::slice(1:20) %>% kable()
+
+```
+
