@@ -325,8 +325,6 @@ genotyping_sheet <- genotyping_sheet_raw %>%
 
 # Remove any duplicated s_labels. We removed duplicated s_labels in genotyping sheet (S-0374, S-0382, S-0381).
 
-# Assign species ID from 
-
 # Join genotyping sheet with collection and isolation data
 fulcrum_dat <- df3 %>% 
   dplyr::full_join(genotyping_sheet) %>%
@@ -386,7 +384,22 @@ fulcrum_dat <- df3 %>%
                 pcr_date,
                 ITS2_pcr_product,
                 rhabditid_pcr_product,
-                notes)
+                notes) %>%
+    #Optional: Input  hike locations maually
+    dplyr::mutate(collection_location = case_when(collection_id == "C-0385" ~ "Judd Trail",
+                                                  collection_id == "C-0422" ~ "Nu'uanu Trail",
+                                                  collection_id %in% c("C-0434",
+                                                                       "C-0435",
+                                                                       "C-0431",
+                                                                       "C-0437",
+                                                                       "C-0432") ~ "Koke'e State Park",
+                                                  collection_id == "C-0184" ~ "Bird Park",
+                                                  collection_id == "C-0071" ~ "'Akaka Falls State Park",
+                                                  collection_id == "C-0126" ~ "Wiliwilinui Ridge",
+                                                  collection_id %in% c("C-0331", "C-0338") ~ "Kuamoo Nounou Trail",
+                                                  collection_id %in% c("C-0528", "C-0104", "C-0119") ~ "Sleeping Giant Trail",
+                                                  collection_id %in% c("C-0367", "C-0368") ~ "Wailua Falls",
+                                                  TRUE ~ collection_location))
 
 # export R dataframe
 save(file = "data/fulcrum/fulcrum_dat.Rda", fulcrum_dat)

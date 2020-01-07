@@ -1,0 +1,33 @@
+species_id,collection_id,isolation_id,substrate,collection_island,collection_location,collection_longitude,collection_latitude
+C. briggsae,C-0437,S-0252,Leaf litter,Kauai,Koke'e State Park,-159.654452,22.129355
+C. briggsae,C-0119,S-0442,Soil,Kauai,Sleeping Giant Trail,-159.3471489,22.0631328
+C. briggsae,C-0104,S-0469,Soil,Kauai,Sleeping Giant Trail,-159.34675,22.061908
+C. briggsae,C-0528,S-0344,Flower,Kauai,Sleeping Giant Trail,-159.346309,22.061725
+C. briggsae,C-0528,S-0346,Flower,Kauai,Sleeping Giant Trail,-159.346309,22.061725
+C. briggsae,C-0338,S-0468,Flower,Kauai,Kuamoo Nounou Trail,-159.36556,22.053315
+C. briggsae,C-0331,S-0109,Fruit,Kauai,Kuamoo Nounou Trail,-159.365368,22.05309
+C. briggsae,C-0368,S-0454,Leaf litter,Kauai,Wailua Falls,-159.379428,22.034472
+C. briggsae,C-0368,S-0453,Leaf litter,Kauai,Wailua Falls,-159.379428,22.034472
+C. briggsae,C-0368,S-0448,Leaf litter,Kauai,Wailua Falls,-159.379428,22.034472
+C. briggsae,C-0367,S-0255,Soil,Kauai,Wailua Falls,-159.379139,22.034244
+C. briggsae,C-0367,S-0256,Soil,Kauai,Wailua Falls,-159.379139,22.034244
+C. briggsae,C-0422,S-0182,Fruit,Oahu,Nu'uanu Trail,-157.8215473,21.342699
+C. briggsae,C-0422,S-0186,Fruit,Oahu,Nu'uanu Trail,-157.8215473,21.342699
+C. elegans,C-0434,S-0078,Fruit,Kauai,Koke'e State Park,-159.654474,22.129398
+C. elegans,C-0435,S-0117,Soil,Kauai,Koke'e State Park,-159.65445,22.129366
+C. elegans,C-0432,S-0450,Fruit,Kauai,Koke'e State Park,-159.654421,22.129343
+C. elegans,C-0432,S-0449,Fruit,Kauai,Koke'e State Park,-159.654421,22.129343
+C. elegans,C-0431,S-0111,Fruit,Kauai,Koke'e State Park,-159.654445,22.12933
+C. elegans,C-0184,S-0415,Vegetation,Big Island,Bird Park,-155.303529,19.43884
+C. elegans,NA,S-0144,NA,NA,NA,NA,NA
+C. elegans,NA,S-0190,NA,NA,NA,NA,NA
+C. tropicalis,C-0385,S-0084,Soil,Oahu,Judd Trail,-157.820900157094,21.3467038399222
+C. tropicalis,C-0422,S-0183,Fruit,Oahu,Nu'uanu Trail,-157.8215473,21.342699
+C. tropicalis,C-0422,S-0184,Fruit,Oahu,Nu'uanu Trail,-157.8215473,21.342699
+C. tropicalis,C-0422,S-0185,Fruit,Oahu,Nu'uanu Trail,-157.8215473,21.342699
+C. tropicalis,C-0126,S-0089,Fruit,Oahu,Wiliwilinui Ridge,-157.7596674,21.314479
+C. tropicalis,C-0071,S-0569,Flower,Big Island,'Akaka Falls State Park,-155.153256,19.854497
+C. tropicalis,C-0071,S-0559,Flower,Big Island,'Akaka Falls State Park,-155.153256,19.854497
+C. tropicalis,C-0071,S-0558,Flower,Big Island,'Akaka Falls State Park,-155.153256,19.854497
+C. tropicalis,C-0071,S-0567,Flower,Big Island,'Akaka Falls State Park,-155.153256,19.854497
+C. tropicalis,C-0071,S-0566,Flower,Big Island,'Akaka Falls State Park,-155.153256,19.854497

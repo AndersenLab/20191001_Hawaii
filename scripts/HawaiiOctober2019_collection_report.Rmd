@@ -1,7 +1,7 @@
 ---
 title: "2019OctoberHawaii_report"
 author: "Tim C."
-date: "12/4/2019"
+date: "01/07/2020"
 output:
   html_document:
     toc: true
@@ -254,6 +254,7 @@ diagnostic_map
 Use this map to manually check latitidue and longitude of collection records.
 <br> <font color="darkred">*Red points*</font> are located using `fulcrum` lat,long and may need to be corrected.
 <br> <font color="darkgreen">*Green points*</font> are located using `photo` lat,long and are usually accurate.
+<br> **Location review results:** No manual corrections for collection locations.
 
 ### collection report
 ```{r, echo=F, warning = F, message=F}
@@ -668,3 +669,92 @@ overview_plot <- map_overview(plot_bar_chart_no_legend, plot_bar_chart_legend, o
 overview_plot
 
 ```
+
+### Target species map
+```{r, echo=F, warning = F, message=F}
+# Target species map function
+# Map_collection function for reviewing collection locations
+map_target_species <- function(df, color_use) {
+  
+  icos <- iconList(
+    red = makeIcon(
+      iconUrl = paste0("https://storage.googleapis.com/andersenlab.org/img/red.svg"),
+      iconWidth = 15, iconHeight = 15,
+      popupAnchorX = 0.001, popupAnchorY = -15,
+      iconAnchorX = 15/2, iconAnchorY = 15
+    ),
+    orange = makeIcon(
+      iconUrl = paste0("https://storage.googleapis.com/andersenlab.org/img/orange.svg"),
+     iconWidth = 15, iconHeight = 15,
+      popupAnchorX = 0.001, popupAnchorY = -15,
+      iconAnchorX = 15/2, iconAnchorY = 15
+  ),
+    blue = makeIcon(
+      iconUrl = paste0("https://storage.googleapis.com/andersenlab.org/img/blue.svg"),
+      iconWidth = 15, iconHeight = 15,
+      popupAnchorX = 0.001, popupAnchorY = -15,
+      iconAnchorX = 15/2, iconAnchorY = 15
+  )
+)
+  df <- dplyr::filter(df, !is.na(df[[color_use]])) %>%
+    dplyr::mutate(substrate=ifelse(is.na(substrate), "", substrate)) %>%
+    dplyr::arrange(species_id)
+  
+  #print(df)
+ 
+  
+  attach(df)
+  leaflet::leaflet(data = df, width = "100%", options = list(zoomControl = T)) %>% 
+    leaflet::addTiles( 
+      paste0( 
+        "https://stamen-tiles-{s}.a.ssl.fastly.net/terrain/{z}/{x}/{y}.png",
+        jsonlite::read_json("data/thunderforest.json")$key)  
+    ) %>%
+    leaflet::addMarkers(~collection_longitude,
+                        ~collection_latitude,
+                        popup = glue::glue("<h2>{collection_id}</h2><hr />
+                                           <strong>collection uplaoded by:</strong> {collection_by}<br />
+                                           <strong>latitidue, longitude:</strong> {format(round(collection_latitude, 6), nsmall = 6)}, {format(round(collection_longitude, 6), nsmall = 6)}<br />
+                                           <strong>C. elegans:</strong> {`C. elegans count`}<br />
+                                           <strong>C. briggsae:</strong> {`C. briggsae count`}<br />
+                                           <strong>C. tropicalis:</strong> {`C. tropicalis count`}<br /><br />"),
+                        popupOptions(maxWidth = 500),
+                        icon = icos[ df[[color_use]] ] )
+  
+  #htmlwidgets::saveWidget(m, tempfile(), selfcontained = FALSE)
+  #webshot::webshot("temp.html", file = "map.png",
+  #        cliprect = "viewport", vwidth = 1000, vheight = 1000)
+}
+
+# Make df for diagnostic plotting
+target_df <- fulcrum_dat %>%
+  dplyr::filter(!is.na(collection_id)) %>%
+  dplyr::filter(species_id %in% c("C. elegans", "C. briggsae", "C. tropicalis")) %>%
+  dplyr::group_by(collection_id, species_id) %>%
+  dplyr::mutate(species_count = n()) %>%
+  dplyr::mutate(`C. elegans count` = ifelse(species_id == "C. elegans", species_count, 0),
+                `C. briggsae count` = ifelse(species_id == "C. briggsae", species_count, 0),
+                `C. tropicalis count` = ifelse(species_id == "C. tropicalis", species_count, 0)) %>%
+  dplyr::ungroup() %>%
+  dplyr::distinct(collection_id, species_id, .keep_all =T) %>%
+  dplyr::arrange(collection_id, desc(species_count)) %>%
+  dplyr::group_by(collection_id) %>%
+  dplyr::mutate(`C. elegans count` = sum(`C. elegans count`),
+                `C. briggsae count` = sum(`C. briggsae count`),
+                `C. tropicalis count` = sum(`C. tropicalis count`)) %>%
+  dplyr::ungroup() %>%
+  dplyr::distinct(collection_id, .keep_all =T)
+  
+
+# map collection for diagnostic
+target_map <-  map_target_species(target_df %>% dplyr::mutate(color = case_when(species_id == "C. elegans" ~ "red",
+                                                                                species_id == "C. briggsae" ~ "blue",
+                                                                                species_id == "C. tropicalis" ~ "orange")), "color")
+
+target_map
+```
+
+### Remaining concerns as of 20200107
+**1.** Two *C. elegans* isolations do not have paired collection data.<br>
+**2.** Two living *Caenorhabditis* isolations (S-0632 and S-0669) have not yet been genotyped with the ITS2 primers.<br>
+**3.** Two isolations (S-0879 and S-0868) have no species id although they produced ITS2 bands. Need to check them manually again. <br>
